@@ -9,6 +9,17 @@ smoothly on a small Rockchip RK3566/RK3568 handheld with a Mali G52 GPU, without
 It ships its own Vulkan driver stack (Mali userspace driver + kernel module) for the time a game runs and gives the
 system's Panfrost driver back when you quit.
 
+## Please take it
+
+The goal of EasyCast is to share as much as possible. If you build a custom OS for low-power handhelds
+(ROCKNIX, Knulli, muOS, ArkOS, BananaOS or your own), you are welcome to ship EasyCast as a ready Dreamcast emulator.
+If you work on another emulator, most of the ideas here are not Dreamcast specific: skipping a game's wait loops,
+choosing the GPU clock from the measured frame time, a page flip that never blocks the render thread, sound in its own
+thread. They can make other emulators faster and cooler on the same weak hardware.
+
+Everything is open: the code of every change, the measurements and what did not work. Start with
+**[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**. Questions and ideas are welcome in Issues.
+
 ## Results
 
 Measured on the RG DS Plus (BananaOS 0.5.3.4), Vulkan, native 640x480 unless noted:
@@ -104,5 +115,7 @@ EasyCast это эмулятор Dreamcast (Flycast + Vulkan) для BananaOS н
 скачайте `Install-EasyCast.sh`, положите в папку Apps (`/data/store/tiles`) и запустите его из Apps. Игры кладите в
 `/data/roms/dreamcast`. **Обновление:** Settings → About → Check for updates. **Удаление:** удалите папку
 `/data/banana/easycast` и ярлык `EasyCast.sh`. Яркость экрана: Select + вверх/вниз.
+
+Буду рад, если разработчики своих прошивок для слабых приставок возьмут EasyCast себе как готовый эмулятор, а авторы других эмуляторов используют эти наработки. Всё открыто: код, замеры и то, что не сработало (docs/DEVELOPMENT.md).
 
 Проект сделан с помощью ИИ (Claude от Anthropic): правки кода, замеры на приставке, сборка и эта страница. Всё проверено вручную на настоящей RG DS Plus.

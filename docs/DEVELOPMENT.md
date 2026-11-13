@@ -40,6 +40,28 @@ so the speed of that one thread decides almost everything.
 | A CPU clock limit set by the emulator | the system already lowers the clock when there is spare time; a limit only cost frames |
 | Lower resolution, frame skipping, per-strip sorting | would change the picture |
 
+## Ideas you can reuse in other emulators
+
+None of these need Dreamcast knowledge. Each one names the files in this repository where it lives.
+
+- **Skip the game's own waiting.** Many games spin in a short loop that reads a counter until the next frame or
+  interrupt. The translated code for such a loop can be recognized (one small block that only reads memory, compares
+  and jumps back to itself) and the emulator can jump straight to the next scheduled event. Here it freed about 20%
+  of the main thread and stopped the overheating in Crazy Taxi. Files: `core/hw/sh4/dyna/easycast_idle.h`.
+- **Choose the GPU clock yourself.** Some Mali kernel drivers report no GPU load, so the system keeps the GPU at full
+  clock. The emulator already knows how long the GPU worked on each frame (timestamp queries); it can lower the clock
+  while there is a big margin and jump back to the top at once when a frame gets close to the budget.
+  Files: `core/rend/vulkan/easycast_gpufreq.h`, `core/rend/vulkan/gpu_timer.h`.
+- **Never block the render thread on the page flip.** Present through DRM/KMS from a small thread of its own, so the
+  thread that builds the next frame does not wait for vertical sync. Files: `core/rend/vulkan/async_present.h`,
+  `core/rend/vulkan/drm_presenter.h`.
+- **Run the sound chip in its own thread** with a small buffer and a lag limit, so the CPU thread of the console does
+  not pay for audio. Files: `core/hw/aica/aica_thread.cpp`.
+- **Let the GPU sleep between frames** (Mali `power_policy` = `coarse_demand`) and **profile guided builds**: both are
+  free wins on these chips.
+- **Measure power from the battery gauge.** `current_avg` and `voltage_avg` of the battery give watts; the gauge
+  updates about every 8 s, so compare runs of 60 s, twice in a row.
+
 ## What limits it now
 
 Dead or Alive 2 in a heavy fight needs the SH4 thread at the full 1.99 GHz. When the chip reaches 70 °C the system
@@ -51,6 +73,9 @@ are limited by the GPU. The next big step would be a deeper rework of the SH4 co
 A test bench loads a savestate, waits 5 to 10 s, then records frames per 5 s, time per thread, GPU time per frame,
 clocks, temperatures and battery power for 15 to 60 s. Each change was run against the previous version with the same
 savestate, usually twice in a row (A, B, A, B), because the handheld warms up during a test.
+
+If you port any of this to another emulator or ship EasyCast in your OS, please tell us in Issues, we will be glad to
+hear it and to help.
 
 This work was done with the help of AI (Claude by Anthropic): code changes, measurements and analysis, with every
 result checked on the real handheld by the project's author.
