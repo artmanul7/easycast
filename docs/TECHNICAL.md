@@ -75,5 +75,7 @@ and clock (`EASYCAST_GPU`, `EASYCAST_GPUFREQ`), skipped wait loops (`EASYCAST_ID
   `pvr.rend = 4` (or `5` for per-pixel) in `emu.cfg`.
 - **Black screen or the GPU module does not load.** Read the newest `userdata/logs/run-*.log`. Usually the kernel
   differs from the one the module was built for.
+- **Error 133 ("Verify Failed ... bm_AddBlock" in the log) while a game loads.** Seen in Grandia II with
+  GD-ROM Fast Loading on. Switch it off (Settings → Advanced → Other), or use it only per game.
 - **Short stutters the first time a scene appears.** The GPU pipelines of that game are built once and then cached.
 - **Slower after a few minutes in heavy games.** The chip reached 70 °C and the system lowered the CPU clock.

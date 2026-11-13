@@ -59,7 +59,7 @@ at 70 °C). How it was done, and what did not work: **[docs/DEVELOPMENT.md](docs
 
 | Setting | Where | What it does |
 |---|---|---|
-| **GD-ROM Fast Loading** | Settings → Advanced → Other | The disc drive works much faster than on a real Dreamcast: shorter loading screens and fewer pauses when a level streams data. Off by default because it is not accurate: some games may misbehave (for example music cut on a loading screen). You can turn it on for one game only with per-game settings. |
+| **GD-ROM Fast Loading** | Settings → Advanced → Other | The disc drive works much faster than on a real Dreamcast: shorter loading screens and fewer pauses when a level streams data. Off by default because it is not accurate: some games misbehave or even stop with error 133 (Grandia II crashes in its intro). Turn it on only for games that work with it. You can turn it on for one game only with per-game settings. |
 | **Swap D-Pad and analog stick** | Settings → Controls | The stick works as the D-Pad and the D-Pad as the stick. Handy for games that want the stick where the D-Pad is more comfortable, or the other way round. Can be set per game. |
 | **Screen brightness** | Settings → Video, or Select + Up / Down in game | Brightness of the screen the game is on. The menu of the handheld keeps its own brightness. |
 | **Screen (top / bottom)** | Settings → Video | Which screen of a two-screen handheld shows the game; the other one is switched off to save power. |
@@ -95,6 +95,7 @@ sources are open (see below). We would be glad to hear about it.
 - Dead or Alive 2 drops to 54 to 58 FPS after several minutes of heavy fighting, when the chip reaches 70 °C.
 - Shenmue's notebook and some cutscenes with lots of transparency are slower than 30 FPS (GPU limit).
 - The first time a scene appears there can be a short stutter while GPU pipelines are built; then they are cached.
+- GD-ROM Fast Loading breaks some games: Grandia II stops with error 133 in its intro. Keep it off, or enable it per game.
 - One-screen devices are untested.
 
 ## Install
