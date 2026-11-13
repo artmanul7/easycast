@@ -1,99 +1,88 @@
-# Flycast
+<p align="center"><img src="media/easycast-logo.png" width="180" alt="EasyCast logo"></p>
 
-[![Android CI](https://github.com/flyinghead/flycast/actions/workflows/android.yml/badge.svg)](https://github.com/flyinghead/flycast/actions/workflows/android.yml)
-[![C/C++ CI](https://github.com/flyinghead/flycast/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/flyinghead/flycast/actions/workflows/c-cpp.yml)
-[![Nintendo Switch CI](https://github.com/flyinghead/flycast/actions/workflows/switch.yml/badge.svg)](https://github.com/flyinghead/flycast/actions/workflows/switch.yml)
-[![Windows UWP CI](https://github.com/flyinghead/flycast/actions/workflows/uwp.yml/badge.svg)](https://github.com/flyinghead/flycast/actions/workflows/uwp.yml)
-[![BSD CI](https://github.com/flyinghead/flycast/actions/workflows/bsd.yml/badge.svg)](https://github.com/flyinghead/flycast/actions/workflows/bsd.yml)
+<h1 align="center">EasyCast</h1>
 
-<img src="shell/linux/flycast.png" alt="flycast logo" width="150"/>
+<p align="center"><b>Dreamcast on low-power handhelds: Flycast + Vulkan, tuned for the Anbernic RG DS Plus on BananaOS.</b></p>
 
-**Flycast** is a multi-platform Sega Dreamcast, Naomi, Naomi 2, and Atomiswave emulator derived from [**reicast**](https://github.com/skmp/reicast-emulator).
+EasyCast is a build of the [Flycast](https://github.com/flyinghead/flycast) emulator (v2.7) made to run Dreamcast games
+smoothly on a small Rockchip RK3566/RK3568 handheld with a Mali G52 GPU, without losing picture quality or accuracy.
+It ships its own Vulkan driver stack (Mali userspace driver + kernel module) for the time a game runs and gives the
+system's Panfrost driver back when you quit.
 
-Information about configuration and supported features can be found on [**TheArcadeStriker's flycast wiki**](https://github.com/TheArcadeStriker/flycast-wiki/wiki).
+## What is different from stock Flycast
 
-Join us on our [**Discord server**](https://discord.gg/X8YWP8w) for a chat.
+- **Faster SH4 emulation on ARM64**: native FTRV/FIPR, fewer memory round trips in translated code, fast-forward of
+  the games' own wait loops (SDK frame wait, RAM polling). Sound (AICA) runs in its own thread.
+- **Vulkan tuned for Mali**: asynchronous page flip on the chosen screen of a two-screen handheld, persistent buffer
+  mapping, no repeated pipeline/descriptor binds, prebuilt pipelines, cheaper per-pixel transparency
+  (Shenmue notebook 16 → 19 FPS).
+- **Less heat**: the emulator sets the GPU clock from the measured GPU time per frame, and the GPU powers down between
+  frames. Less throttling in long sessions.
+- **Handheld controls**: swap D-Pad and analog stick (Settings → Controls), brightness of the game screen
+  (Settings → Video, or **Select + Up / Down** in game).
+- **Updates inside the emulator**: Settings → About → *Check for updates*.
 
-## Downloads ![android](https://flyinghead.github.io/flycast-builds/android.jpg) ![windows](https://flyinghead.github.io/flycast-builds/windows.png) ![linux](https://flyinghead.github.io/flycast-builds/ubuntu.png) ![apple](https://flyinghead.github.io/flycast-builds/apple.png) ![switch](https://flyinghead.github.io/flycast-builds/switch.png) ![xbox](https://flyinghead.github.io/flycast-builds/xbox.png)
+Measured on the RG DS Plus (BananaOS 0.5.3.4): Dead or Alive 2 heavy fight ~58 FPS on a cool device, Crazy Taxi,
+Sonic Adventure, Soul Calibur 60 FPS, Shenmue per-pixel 30 FPS.
 
-Get builds for your system from the [**builds page**](https://flyinghead.github.io/flycast-builds/) or [**GitHub Releases**](https://github.com/flyinghead/flycast/releases).
+## Compatibility
 
-- **Latest master builds:** regular builds from the `master` branch with recent fixes and updates.
-- **Nightly dev builds:** experimental builds with the latest features and changes.
-- **Stable tagged releases:** versioned release builds published on GitHub Releases.
+| Device | OS | Status |
+|---|---|---|
+| Anbernic RG DS Plus (RK3568, Mali G52, two screens) | BananaOS 0.5.2.2 / 0.5.3.4 (kernel 7.2.7-banana) | ✅ tested |
+| Other RK3566/RK3568 devices | BananaOS with the same kernel | ⚠️ should start, untested |
+| One-screen devices | — | ⚠️ untested (EasyCast was only tested on two screens) |
+| Other systems (ROCKNIX, Knulli, muOS, ArkOS…) | — | ❌ the GPU module must match the kernel |
 
-Automated test results are available from the builds page as well.
+The installer and the launcher check one hard rule: the bundled GPU module (`mali_kbase.ko`) must be built for exactly
+the running kernel (`uname -r`). The OS name and device are only reported.
+
+**Ports are welcome.** If you build the module for your kernel, or want EasyCast in your OS image, go ahead — all the
+sources are open (see below). We would be glad to hear about it.
 
 ## Install
 
-### Android ![android](https://flyinghead.github.io/flycast-builds/android.jpg)
+1. Connect the handheld to Wi-Fi.
+2. Download **[Install-EasyCast.sh](https://github.com/artmanul7/easycast/releases/latest/download/Install-EasyCast.sh)**
+   and put it into the **Apps** folder: `/data/store/tiles` (on the BananaOS network share: `store\tiles`).
+3. On the handheld open **Apps** and start **Install-EasyCast**. It downloads the latest release, checks its SHA-256
+   and the kernel, installs to `/data/banana/easycast`, adds the **EasyCast** tile and removes itself.
+4. Put your games (`.chd .gdi .cdi .cue`) into `/data/roms/dreamcast`. An original BIOS is optional
+   (`/data/bios/dc`); without it Flycast's built-in HLE BIOS is used.
 
-Install Flycast from [**Google Play**](https://play.google.com/store/apps/details?id=com.flycast.emulator).
+## Update
 
-### Flatpak (Linux ![ubuntu logo](https://flyinghead.github.io/flycast-builds/ubuntu.png))
+Settings → About → **Check for updates** → **Install x.y.z**, then quit and start EasyCast again.
+EasyCast also checks once a day at start (when online) and shows a short notice if a new version exists.
+Your settings and saves (`/data/banana/easycast/userdata`) are never touched by updates; the previous version is kept
+until the next update.
 
-1. [Set up Flatpak](https://www.flatpak.org/setup/).
+## Remove
 
-2. Install Flycast from [Flathub](https://flathub.org/apps/details/org.flycast.Flycast):
+Delete the folder `/data/banana/easycast` and the tile `/data/store/tiles/EasyCast.sh`.
 
-`flatpak install -y org.flycast.Flycast`
+## Controls (RG DS Plus)
 
-3. Run Flycast:
+| Buttons | Action |
+|---|---|
+| Menu | Settings |
+| Select + Menu | Quit |
+| Select + Up / Down | Screen brightness |
 
-`flatpak run org.flycast.Flycast`
+## Sources and licences
 
-### Homebrew (macOS ![apple logo](https://flyinghead.github.io/flycast-builds/apple.png))
+- Flycast with all EasyCast changes: **[this repository, branch `easycast`](https://github.com/artmanul7/easycast/tree/easycast)** — GPL-2.0.
+- SDL2 (patched), `mali_kbase` module (GPL-2.0), libmali hook and kernel build inputs: `easycast-x.y.z-gpl-sources.tar.gz` in every release.
+- Mali userspace driver: binary from Arm/Rockchip (via [ROCKNIX/libmali](https://github.com/ROCKNIX/libmali)), unchanged, under the Mali EULA included in the package.
+- Flycast is made by flyinghead and contributors. BananaOS by [JorreFog](https://github.com/JorreFog/BananaLinux).
 
-1. [Set up Homebrew](https://brew.sh).
+EasyCast is a fan project, not affiliated with SEGA. Dreamcast is a trademark of SEGA. Bring your own games.
 
-2. Install Flycast via Homebrew:
+---
 
-`brew install --cask flycast`
+### По-русски
 
-### iOS
-
-Due to persistent harassment from an iOS user, support for this platform has been dropped.
-
-### Xbox One/Series ![xbox logo](https://flyinghead.github.io/flycast-builds/xbox.png)
-
-Grab the latest build from [**the builds page**](https://flyinghead.github.io/flycast-builds/), or the [**GitHub Actions**](https://github.com/flyinghead/flycast/actions/workflows/uwp.yml). Then install it using the **Xbox Device Portal**.
-
-## Build from source
-
-### macOS
-
-Right-click the bootstrap script and choose **Open**:
-
-`shell/apple/generate_xcode_project.command`
-
-### Windows
-
-Double-click the bootstrap script:
-
-`shell\windows\generate_vs_project.bat`
-
-### Linux
-
-#### Dependencies
-
-- **C/C++ compiler toolchain** (e.g. `gcc`/`g++`)
-- **CMake**
-- **make**
-- **libcurl** (development headers)
-- **libudev** (development headers)
-- **SDL2** (development headers)
-- **Graphics API**: Vulkan, OpenGL
-
-#### Build
-
-```
-$ git clone --recursive https://github.com/flyinghead/flycast.git
-$ cd flycast
-$ mkdir build && cd build
-$ cmake ..
-$ make
-```
-
-## Packaging status
-
-[![Packaging status](https://repology.org/badge/vertical-allrepos/flycast.svg)](https://repology.org/project/flycast/versions)
+EasyCast — эмулятор Dreamcast (Flycast + Vulkan) для BananaOS на Anbernic RG DS Plus. **Установка:** подключите Wi-Fi,
+скачайте `Install-EasyCast.sh`, положите в папку Apps (`/data/store/tiles`) и запустите его из Apps. Игры — в
+`/data/roms/dreamcast`. **Обновление:** Settings → About → Check for updates. **Удаление:** удалите папку
+`/data/banana/easycast` и ярлык `EasyCast.sh`. Яркость экрана: Select + вверх/вниз.

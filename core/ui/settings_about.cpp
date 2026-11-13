@@ -53,7 +53,7 @@ void gui_settings_about()
 	{
 		header("EasyCast");
 		ImGui::Text("Version: %s", easycast_update::current());
-		ImGui::TextUnformatted("github.com/artmanul-rgb/easycast");
+		ImGui::TextUnformatted("github.com/artmanul7/easycast");
 		easycast_update::State &us = easycast_update::state();
 		std::string status, result, ver;
 		{
