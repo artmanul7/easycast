@@ -20,6 +20,13 @@ thread. They can make other emulators faster and cooler on the same weak hardwar
 Everything is open: the code of every change, the measurements and what did not work. Start with
 **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**. Questions and ideas are welcome in Issues.
 
+| Document | What is inside |
+|---|---|
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | every optimization, why, what it gave, what was dropped, ideas for other emulators |
+| [docs/TECHNICAL.md](docs/TECHNICAL.md) | Mali driver switching on BananaOS, two screens, all switches, logs, files, troubleshooting |
+| [docs/BUILDING.md](docs/BUILDING.md) | cross-compiling, PGO, building the GPU kernel module for another kernel |
+| [CHANGELOG.md](CHANGELOG.md) | what each version changed |
+
 ## Results
 
 Measured on the RG DS Plus (BananaOS 0.5.3.4), Vulkan, native 640x480 unless noted:
@@ -67,11 +74,28 @@ at 70 °C). How it was done, and what did not work: **[docs/DEVELOPMENT.md](docs
 | One-screen devices | any | ⚠️ untested (EasyCast was only tested on two screens) |
 | Other systems (ROCKNIX, Knulli, muOS, ArkOS…) | their own kernels | ❌ the GPU module must match the kernel |
 
+Other RK3566/RK3568 handhelds (for example the Anbernic RG353 series, RG503, Powkiddy RGB30) have the same
+Mali G52 GPU. EasyCast may run there once the GPU module is built for their kernel (see docs/BUILDING.md).
+
 The installer and the launcher check one hard rule: the bundled GPU module (`mali_kbase.ko`) must be built for exactly
 the running kernel (`uname -r`). The OS name and device are only reported.
 
 **Ports are welcome.** If you build the module for your kernel, or want EasyCast in your OS image, go ahead: all the
 sources are open (see below). We would be glad to hear about it.
+
+## Requirements
+
+- BananaOS with kernel 7.2.7-banana on an RK3566/RK3568 handheld, Wi-Fi for installing and updates
+- About 100 MB free on the card
+- Dreamcast games as `.chd`, `.gdi`, `.cdi` or `.cue` in `/data/roms/dreamcast`
+- An original BIOS is optional: without it Flycast's built-in HLE BIOS is used
+
+## Known issues
+
+- Dead or Alive 2 drops to 54 to 58 FPS after several minutes of heavy fighting, when the chip reaches 70 °C.
+- Shenmue's notebook and some cutscenes with lots of transparency are slower than 30 FPS (GPU limit).
+- The first time a scene appears there can be a short stutter while GPU pipelines are built; then they are cached.
+- One-screen devices are untested.
 
 ## Install
 
@@ -113,9 +137,14 @@ EasyCast is a fan project, not affiliated with SEGA. Dreamcast is a trademark of
 
 ## Made with AI
 
-EasyCast was built with the help of AI. The code changes, the measurements on the handheld, the packaging and this
-page were made together with Claude (an AI assistant by Anthropic) and checked by hand on a real RG DS Plus.
+EasyCast was built with the help of AI assistants. Most optimizations, the measurements on the handheld, the
+packaging and this page were made together with Claude (Anthropic); the first builds with ChatGPT (OpenAI).
+Every result was checked by hand on a real RG DS Plus.
 Bug reports and pull requests are welcome.
+
+**Keywords:** Dreamcast emulator, Flycast fork, Vulkan, Mali G52, Bifrost, libmali, mali_kbase, Panfrost, RK3566,
+RK3568, Rockchip, Anbernic RG DS Plus, dual screen handheld, ARM64, Cortex-A55, SH4 dynarec, BananaOS, low power,
+thermal throttling, GPU DVFS, retro handheld.
 
 ---
 
@@ -128,4 +157,4 @@ EasyCast это эмулятор Dreamcast (Flycast + Vulkan) для BananaOS н
 
 Буду рад, если разработчики своих прошивок для слабых приставок возьмут EasyCast себе как готовый эмулятор, а авторы других эмуляторов используют эти наработки. Всё открыто: код, замеры и то, что не сработало (docs/DEVELOPMENT.md).
 
-Проект сделан с помощью ИИ (Claude от Anthropic): правки кода, замеры на приставке, сборка и эта страница. Всё проверено вручную на настоящей RG DS Plus.
+Проект сделан с помощью ИИ (в основном Claude от Anthropic, первые сборки с ChatGPT): правки кода, замеры на приставке, сборка и эта страница. Всё проверено вручную на настоящей RG DS Plus.

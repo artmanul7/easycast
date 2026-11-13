@@ -34,7 +34,7 @@ so the speed of that one thread decides almost everything.
 |---|---|
 | Open source Mali driver build (malisx2) | Shenmue ran slower than with the Arm driver |
 | Batching transparent layers | textures flickered |
-| Pinning threads to fixed cores | no gain, the system scheduler already does well |
+| Other thread to core layouts (moving the render or sound thread) | no gain over the default pinning |
 | Waking the sound thread less often | about 0.2%, not worth it |
 | Cached (CPU side) GPU buffers | slower on this Mali |
 | A CPU clock limit set by the emulator | the system already lowers the clock when there is spare time; a limit only cost frames |
@@ -77,5 +77,6 @@ savestate, usually twice in a row (A, B, A, B), because the handheld warms up du
 If you port any of this to another emulator or ship EasyCast in your OS, please tell us in Issues, we will be glad to
 hear it and to help.
 
-This work was done with the help of AI (Claude by Anthropic): code changes, measurements and analysis, with every
-result checked on the real handheld by the project's author.
+This work was done with the help of AI assistants: Claude by Anthropic (most of the optimizations, measurements and
+this release) and, for the first builds, ChatGPT by OpenAI. Every result was checked on the real handheld by the
+project's author.
