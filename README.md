@@ -9,21 +9,33 @@ smoothly on a small Rockchip RK3566/RK3568 handheld with a Mali G52 GPU, without
 It ships its own Vulkan driver stack (Mali userspace driver + kernel module) for the time a game runs and gives the
 system's Panfrost driver back when you quit.
 
+## Results
+
+Measured on the RG DS Plus (BananaOS 0.5.3.4), Vulkan, native 640x480 unless noted:
+
+| Game | Before | EasyCast 0.2.8 |
+|---|---|---|
+| Dead or Alive 2, heavy fight | about 25 FPS (stock libretro Flycast on BananaOS), about 30 FPS (first EasyCast builds) | 58 to 60 FPS on a cool handheld |
+| Soul Calibur | 10 to 15 FPS felt (stock firmware Flycast) | 60 FPS, even at 1.5x resolution |
+| Crazy Taxi | 60 FPS, but the handheld reached 70 °C and slowed down after 5 minutes | 60 FPS, stays under 68 °C, no slowdown |
+| Sonic Adventure 2 | | 60 FPS |
+| Shenmue (per-pixel transparency) | | its native 30 FPS in most scenes |
+
+Picture, sound and accuracy are the same as stock Flycast: no frame skipping, no lower resolution, no hacks per game.
+Long sessions in Dead or Alive 2 still drop to 54 to 58 FPS when the chip gets hot (the system lowers the CPU clock
+at 70 °C). How it was done, and what did not work: **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**.
+
 ## What is different from stock Flycast
 
 - **Faster SH4 emulation on ARM64**: native FTRV/FIPR, fewer memory round trips in translated code, fast-forward of
   the games' own wait loops (SDK frame wait, RAM polling). Sound (AICA) runs in its own thread.
 - **Vulkan tuned for Mali**: asynchronous page flip on the chosen screen of a two-screen handheld, persistent buffer
-  mapping, no repeated pipeline/descriptor binds, prebuilt pipelines, cheaper per-pixel transparency
-  (Shenmue notebook 16 → 19 FPS).
+  mapping, no repeated pipeline/descriptor binds, prebuilt pipelines, cheaper per-pixel transparency.
 - **Less heat**: the emulator sets the GPU clock from the measured GPU time per frame, and the GPU powers down between
-  frames. Less throttling in long sessions.
+  frames.
 - **Handheld controls**: swap D-Pad and analog stick (Settings → Controls), brightness of the game screen
   (Settings → Video, or **Select + Up / Down** in game).
 - **Updates inside the emulator**: Settings → About → *Check for updates*.
-
-Measured on the RG DS Plus (BananaOS 0.5.3.4): Dead or Alive 2 heavy fight ~58 FPS on a cool device, Crazy Taxi,
-Sonic Adventure, Soul Calibur 60 FPS, Shenmue per-pixel 30 FPS.
 
 ## Compatibility
 
