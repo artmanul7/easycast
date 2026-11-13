@@ -48,6 +48,16 @@ at 70 °C). How it was done, and what did not work: **[docs/DEVELOPMENT.md](docs
   (Settings → Video, or **Select + Up / Down** in game).
 - **Updates inside the emulator**: Settings → About → *Check for updates*.
 
+## New settings
+
+| Setting | Where | What it does |
+|---|---|---|
+| **GD-ROM Fast Loading** | Settings → Advanced → Other | The disc drive works much faster than on a real Dreamcast: shorter loading screens and fewer pauses when a level streams data. Off by default because it is not accurate: some games may misbehave (for example music cut on a loading screen). You can turn it on for one game only with per-game settings. |
+| **Swap D-Pad and analog stick** | Settings → Controls | The stick works as the D-Pad and the D-Pad as the stick. Handy for games that want the stick where the D-Pad is more comfortable, or the other way round. Can be set per game. |
+| **Screen brightness** | Settings → Video, or Select + Up / Down in game | Brightness of the screen the game is on. The menu of the handheld keeps its own brightness. |
+| **Screen (top / bottom)** | Settings → Video | Which screen of a two-screen handheld shows the game; the other one is switched off to save power. |
+| **Check for updates** | Settings → About | Finds and installs a new EasyCast version from GitHub. |
+
 ## Compatibility
 
 | Device | OS | Status |
@@ -114,7 +124,7 @@ Bug reports and pull requests are welcome.
 EasyCast это эмулятор Dreamcast (Flycast + Vulkan) для BananaOS на Anbernic RG DS Plus. **Установка:** подключите Wi-Fi,
 скачайте `Install-EasyCast.sh`, положите в папку Apps (`/data/store/tiles`) и запустите его из Apps. Игры кладите в
 `/data/roms/dreamcast`. **Обновление:** Settings → About → Check for updates. **Удаление:** удалите папку
-`/data/banana/easycast` и ярлык `EasyCast.sh`. Яркость экрана: Select + вверх/вниз.
+`/data/banana/easycast` и ярлык `EasyCast.sh`. Новые настройки: ускоренный привод GD-ROM (Settings → Advanced → Other), смена местами крестовины и стика (Settings → Controls), яркость экрана (Settings → Video или Select + вверх/вниз), выбор экрана, проверка обновлений (Settings → About).
 
 Буду рад, если разработчики своих прошивок для слабых приставок возьмут EasyCast себе как готовый эмулятор, а авторы других эмуляторов используют эти наработки. Всё открыто: код, замеры и то, что не сработало (docs/DEVELOPMENT.md).
 
