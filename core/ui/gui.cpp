@@ -17,6 +17,7 @@
     along with Flycast.  If not, see <https://www.gnu.org/licenses/>.
  */
 #include "gui.h"
+#include "easycast_update.h"
 #include "rend/osd.h"
 #include "cfg/cfg.h"
 #include "imgui.h"
@@ -139,6 +140,11 @@ void gui_init()
     EventManager::listen(Event::Start, emuEventCallback);
 	EventManager::listen(Event::Terminate, emuEventCallback);
     ggpo::receiveChatMessages([](int playerNum, const std::string& msg) { chat.receive(playerNum, msg); });
+	{
+		std::string newer;	// EasyCast 0.2.8: the launcher's daily check found a newer release
+		if (easycast_update::newerKnown(newer))
+			os_notify(("EasyCast " + newer + " is available: Settings > About").c_str(), 6000);
+	}
 
 #ifdef TARGET_UWP
 	{

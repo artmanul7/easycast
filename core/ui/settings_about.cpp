@@ -22,6 +22,7 @@
 #include "wsi/context.h"
 #include "oslib/storage.h"
 #include "mainui.h"
+#include "easycast_update.h"
 #ifdef __ANDROID__
 #if HOST_CPU == CPU_ARM64 && USE_VULKAN
 #include "rend/vulkan/adreno.h"
@@ -48,6 +49,35 @@ static void customDriverCallback(bool cancelled, std::string selection)
 
 void gui_settings_about()
 {
+	if (easycast_update::tool() != nullptr)	// EasyCast 0.2.8: updates from GitHub Releases
+	{
+		header("EasyCast");
+		ImGui::Text("Version: %s", easycast_update::current());
+		ImGui::TextUnformatted("github.com/artmanul-rgb/easycast");
+		easycast_update::State &us = easycast_update::state();
+		std::string status, result, ver;
+		{
+			std::lock_guard<std::mutex> g(us.lock);
+			status = us.status; result = us.result; ver = us.version;
+		}
+		const bool busy = us.busy;
+		{
+			DisabledScope scope(busy);
+			if (ImGui::Button("Check for updates"))
+				easycast_update::run("--check");
+			if (result == "newer" && !busy)
+			{
+				ImGui::SameLine();
+				if (ImGui::Button(("Install " + ver).c_str()))
+					easycast_update::run("--install");
+			}
+		}
+		if (!status.empty())
+			ImGui::TextWrapped("%s", status.c_str());
+		if (result == "installed")
+			ImGui::TextWrapped("Quit EasyCast and start it again from Apps to use the new version.");
+		ImGui::Spacing();
+	}
     header("Flycast");
     {
 		ImGui::Text(T("Version: %s"), GIT_VERSION);
