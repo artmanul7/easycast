@@ -31,13 +31,13 @@ Sonic Adventure, Soul Calibur 60 FPS, Shenmue per-pixel 30 FPS.
 |---|---|---|
 | Anbernic RG DS Plus (RK3568, Mali G52, two screens) | BananaOS 0.5.2.2 / 0.5.3.4 (kernel 7.2.7-banana) | ✅ tested |
 | Other RK3566/RK3568 devices | BananaOS with the same kernel | ⚠️ should start, untested |
-| One-screen devices | — | ⚠️ untested (EasyCast was only tested on two screens) |
-| Other systems (ROCKNIX, Knulli, muOS, ArkOS…) | — | ❌ the GPU module must match the kernel |
+| One-screen devices | any | ⚠️ untested (EasyCast was only tested on two screens) |
+| Other systems (ROCKNIX, Knulli, muOS, ArkOS…) | their own kernels | ❌ the GPU module must match the kernel |
 
 The installer and the launcher check one hard rule: the bundled GPU module (`mali_kbase.ko`) must be built for exactly
 the running kernel (`uname -r`). The OS name and device are only reported.
 
-**Ports are welcome.** If you build the module for your kernel, or want EasyCast in your OS image, go ahead — all the
+**Ports are welcome.** If you build the module for your kernel, or want EasyCast in your OS image, go ahead: all the
 sources are open (see below). We would be glad to hear about it.
 
 ## Install
@@ -71,18 +71,26 @@ Delete the folder `/data/banana/easycast` and the tile `/data/store/tiles/EasyCa
 
 ## Sources and licences
 
-- Flycast with all EasyCast changes: **[this repository, branch `easycast`](https://github.com/artmanul7/easycast/tree/easycast)** — GPL-2.0.
+- Flycast with all EasyCast changes: **[this repository, branch `easycast`](https://github.com/artmanul7/easycast/tree/easycast)** (GPL-2.0).
 - SDL2 (patched), `mali_kbase` module (GPL-2.0), libmali hook and kernel build inputs: `easycast-x.y.z-gpl-sources.tar.gz` in every release.
 - Mali userspace driver: binary from Arm/Rockchip (via [ROCKNIX/libmali](https://github.com/ROCKNIX/libmali)), unchanged, under the Mali EULA included in the package.
 - Flycast is made by flyinghead and contributors. BananaOS by [JorreFog](https://github.com/JorreFog/BananaLinux).
 
 EasyCast is a fan project, not affiliated with SEGA. Dreamcast is a trademark of SEGA. Bring your own games.
 
+## Made with AI
+
+EasyCast was built with the help of AI. The code changes, the measurements on the handheld, the packaging and this
+page were made together with Claude (an AI assistant by Anthropic) and checked by hand on a real RG DS Plus.
+Bug reports and pull requests are welcome.
+
 ---
 
 ### По-русски
 
-EasyCast — эмулятор Dreamcast (Flycast + Vulkan) для BananaOS на Anbernic RG DS Plus. **Установка:** подключите Wi-Fi,
-скачайте `Install-EasyCast.sh`, положите в папку Apps (`/data/store/tiles`) и запустите его из Apps. Игры — в
+EasyCast это эмулятор Dreamcast (Flycast + Vulkan) для BananaOS на Anbernic RG DS Plus. **Установка:** подключите Wi-Fi,
+скачайте `Install-EasyCast.sh`, положите в папку Apps (`/data/store/tiles`) и запустите его из Apps. Игры кладите в
 `/data/roms/dreamcast`. **Обновление:** Settings → About → Check for updates. **Удаление:** удалите папку
 `/data/banana/easycast` и ярлык `EasyCast.sh`. Яркость экрана: Select + вверх/вниз.
+
+Проект сделан с помощью ИИ (Claude от Anthropic): правки кода, замеры на приставке, сборка и эта страница. Всё проверено вручную на настоящей RG DS Plus.
