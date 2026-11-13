@@ -29,6 +29,8 @@
 #include "../quad.h"
 #include "oit_buffer.h"
 #include "../drawer.h"
+#include "../gpu_timer.h"
+#include "easycast_oit.h"
 
 #include <array>
 #include <memory>
@@ -151,6 +153,7 @@ public:
 	void Term()
 	{
 		screenPipelineManager.reset();
+		easycast_oit::term();
 		OITDrawer::Term();
 	}
 
@@ -166,6 +169,7 @@ public:
 		}
 		else
 		{
+			easycast_gpu::end(currentCommandBuffer);
 			currentCommandBuffer.end();
 			commandPool->EndFrame();
 			aspectRatio = getOutputFramebufferAspectRatio();

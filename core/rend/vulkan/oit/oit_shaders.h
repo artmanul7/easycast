@@ -25,7 +25,7 @@
 
 #include <map>
 
-enum class Pass { Depth, Color, OIT };
+enum class Pass { Depth, Color, OIT, ColorPre };	// EasyCast: ColorPre = colour pass in subpass 0, no pre-pass
 
 class OITShaderManager
 {

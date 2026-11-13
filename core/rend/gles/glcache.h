@@ -3,6 +3,9 @@
 #include <map>
 
 #define TEXTURE_ID_CACHE_SIZE 32
+#ifndef GL_TEXTURE_MAX_ANISOTROPY
+#define GL_TEXTURE_MAX_ANISOTROPY 0x84FE
+#endif
 
 class GLCache {
 public:
@@ -13,6 +16,7 @@ public:
 			if (texture != _texture) {
 				glBindTexture(target, texture);
 				_texture = texture;
+				_cur_texture_params = nullptr;
 			}
 		}
 		else
@@ -49,7 +53,10 @@ public:
 		{
 			_texture_params.erase(textures[i]);
 			if (textures[i] == _texture)
+			{
 				_texture = 0;
+				_cur_texture_params = nullptr;
+			}
 		}
 		glDeleteTextures(n, textures);
 	}
@@ -126,7 +133,9 @@ public:
 	{
 		if (target == GL_TEXTURE_2D && !_disable_cache)
 		{
-			TextureParameters &cur_params = _texture_params[_texture];
+			if (_cur_texture_params == nullptr)
+				_cur_texture_params = &_texture_params[_texture];
+			TextureParameters &cur_params = *_cur_texture_params;
 			switch (pname) {
 			case GL_TEXTURE_MIN_FILTER:
 				if (cur_params._min_filter == (GLenum)param)
@@ -153,6 +162,17 @@ public:
 		glTexParameteri(target, pname, param);
 	}
 
+	void TexAnisotropy(GLfloat value) {
+		if (!_disable_cache) {
+			if (_cur_texture_params == nullptr)
+				_cur_texture_params = &_texture_params[_texture];
+			if (_cur_texture_params->_anisotropy == value)
+				return;
+			_cur_texture_params->_anisotropy = value;
+		}
+		glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, value);
+	}
+
 	GLuint GenTexture() {
 		if (_texture_cache_size == 0) {
 			_texture_cache_size = TEXTURE_ID_CACHE_SIZE;
@@ -172,6 +192,7 @@ public:
 
 	void Reset() {
 		_texture = 0xFFFFFFFFu;
+		_cur_texture_params = nullptr;
 		_texture_params.clear();
 		_src_blend_factor = 0xFFFFFFFFu;
 		_dst_blend_factor = 0xFFFFFFFFu;
@@ -226,6 +247,7 @@ private:
 		GLenum _mag_filter;
 		GLenum _wrap_s;
 		GLenum _wrap_t;
+		GLfloat _anisotropy = -1.f;
 	};
 
 	void setCapability(GLenum cap, GLboolean value) {
@@ -318,6 +340,8 @@ private:
 	GLuint _texture_ids[TEXTURE_ID_CACHE_SIZE];
 	GLsizei _texture_cache_size = 0;
 	std::map<GLuint, TextureParameters> _texture_params;
+	// std::map insertion preserves references; invalidate on bind, deletion or reset.
+	TextureParameters *_cur_texture_params = nullptr;
 	bool _disable_cache;
 };
 

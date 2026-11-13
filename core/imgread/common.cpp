@@ -1,4 +1,5 @@
 #include "common.h"
+#include "easycast_diag.h"
 #include "hw/gdrom/gdromv3.h"
 #include "cfg/option.h"
 #include "stdclass.h"
@@ -28,6 +29,7 @@ constexpr Disc* (*drivers[])(const char* path, std::vector<u8> *digest)
 };
 
 static u8 q_subchannel[96];
+#include "easycast_disc.h"
 
 static bool convertSector(u8* in_buff , u8* out_buff , int from , int to,int sector)
 {
@@ -171,6 +173,7 @@ static bool doDiscSwap(const std::string& path)
 
 void termDrive()
 {
+	easycast_disc::reset();
 	sh4_sched_request(schedId, -1);
 	delete disc;
 	disc = nullptr;
@@ -208,8 +211,9 @@ static u32 createTrackInfoFirstLast(const Track& track, u32 tracknum)
 
 u32 libGDR_ReadSector(u8 *buff, u32 startSector, u32 sectorCount, u32 sectorSize, bool stopOnMiss)
 {
+	easycast_diag::DiscScope easycastDisc;
 	if (disc != nullptr)
-		return disc->ReadSectors(startSector, sectorCount, buff, sectorSize, stopOnMiss);
+		return easycast_disc::read(disc, buff, startSector, sectorCount, sectorSize, stopOnMiss);
 	if (stopOnMiss)
 		return 0;
 	memset(buff, 0, sectorCount * sectorSize);
@@ -283,8 +287,9 @@ bool Disc::readSector(u32 FAD, u8 *dst, SectorFormat *sector_type, u8 *subcode, 
 	return false;
 }
 
-u32 Disc::ReadSectors(u32 FAD, u32 count, u8* dst, u32 fmt, bool stopOnMiss, LoadProgress *progress)
+u32 Disc::ReadSectors(u32 FAD, u32 count, u8* dst, u32 fmt, bool stopOnMiss, LoadProgress *progress, u8 *subq, bool *miss)
 {
+	u8 *subqOut = subq != nullptr ? subq : q_subchannel;	// EasyCast: read-ahead keeps its own subchannel
 	u8 temp[2448];
 	SectorFormat secfmt;
 	SubcodeFormat subfmt;
@@ -300,8 +305,10 @@ u32 Disc::ReadSectors(u32 FAD, u32 count, u8* dst, u32 fmt, bool stopOnMiss, Loa
 		}
 		if (FAD >= LeadOut.StartFAD && stopOnMiss)
 			return i;
-		if (!readSector(FAD, temp, &secfmt, q_subchannel, &subfmt))
+		if (!readSector(FAD, temp, &secfmt, subqOut, &subfmt))
 		{
+			if (miss != nullptr)
+				*miss = true;
 			WARN_LOG(GDROM, "Sector Read miss FAD: %d", FAD);
 			memset(temp, 0, sizeof(temp));
 			secfmt = SECFMT_2352;

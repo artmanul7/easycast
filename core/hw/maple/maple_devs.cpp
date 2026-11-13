@@ -88,6 +88,15 @@ struct maple_sega_controller: maple_base
 	virtual u16 getButtonState(const PlainJoystickState &pjs)
 	{
 		u32 kcode = pjs.kcode;
+		if (config::StickDpadSwap)
+		{
+			const int x = (int)pjs.joy[PJAI_X1] - 128, y = (int)pjs.joy[PJAI_Y1] - 128;
+			kcode |= DC_DPAD_UP | DC_DPAD_DOWN | DC_DPAD_LEFT | DC_DPAD_RIGHT;	// 1 = released
+			if (x <= -64) kcode &= ~DC_DPAD_LEFT;
+			if (x >= 64) kcode &= ~DC_DPAD_RIGHT;
+			if (y <= -64) kcode &= ~DC_DPAD_UP;
+			if (y >= 64) kcode &= ~DC_DPAD_DOWN;
+		}
 		mutualExclusion(kcode, DC_DPAD_UP | DC_DPAD_DOWN);
 		mutualExclusion(kcode, DC_DPAD_LEFT | DC_DPAD_RIGHT);
 		return kcode | 0xF901;		// mask off DPad2, C, D and Z;
@@ -100,6 +109,12 @@ struct maple_sega_controller: maple_base
 			// Limit the magnitude of the analog axes to 128
 			s8 xaxis = pjs.joy[PJAI_X1] - 128;
 			s8 yaxis = pjs.joy[PJAI_Y1] - 128;
+			if (config::StickDpadSwap)
+			{
+				const u32 k = pjs.kcode;	// 0 = pressed
+				xaxis = (s8)(((int)!(k & DC_DPAD_RIGHT) - (int)!(k & DC_DPAD_LEFT)) * 127);
+				yaxis = (s8)(((int)!(k & DC_DPAD_DOWN) - (int)!(k & DC_DPAD_UP)) * 127);
+			}
 			limit_joystick_magnitude<128>(xaxis, yaxis);
 			if (index == 2)
 				return xaxis + 128;

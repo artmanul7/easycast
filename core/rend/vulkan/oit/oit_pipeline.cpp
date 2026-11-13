@@ -19,6 +19,7 @@
     along with Flycast.  If not, see <https://www.gnu.org/licenses/>.
 */
 #include "oit_pipeline.h"
+#include "easycast_diag.h"
 #include "../quad.h"
 
 void OITPipelineManager::CreatePipeline(u32 listType, bool autosort, const PolyParam& pp, Pass pass, int gpuPalette, bool useBDA)
@@ -103,7 +104,7 @@ void OITPipelineManager::CreatePipeline(u32 listType, bool autosort, const PolyP
 	vk::PipelineColorBlendAttachmentState pipelineColorBlendAttachmentState;
 	vk::ColorComponentFlags colorComponentFlags(vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA);
 	// Apparently punch-through polys support blending, or at least some combinations
-	if (listType == ListType_Punch_Through || pass == Pass::Color)
+	if (listType == ListType_Punch_Through || pass == Pass::Color || pass == Pass::ColorPre)
 	{
 		u32 src = pp.tsp.SrcInstr;
 		u32 dst = pp.tsp.DstInstr;
@@ -190,10 +191,10 @@ void OITPipelineManager::CreatePipeline(u32 listType, bool autosort, const PolyP
 	  &pipelineDynamicStateCreateInfo,            // pDynamicState
 	  *pipelineLayout,                            // layout
 	  renderPasses->GetRenderPass(true, true),    // renderPass
-	  pass == Pass::Depth ? (listType == ListType_Translucent ? 2 : 0) : 1 // subpass
+	  pass == Pass::ColorPre ? 0 : pass == Pass::Depth ? (listType == ListType_Translucent ? 2 : 0) : 1 // subpass
 	);
 
-	pipelines[hash(listType, autosort, &pp, pass, gpuPalette, useBDA)] = GetContext()->GetDevice().createGraphicsPipelineUnique(GetContext()->GetPipelineCache(),
+	pipelines[hash(listType, autosort, &pp, pass, gpuPalette, useBDA)] = easycast_diag::timedPipeline(GetContext()->GetDevice(), GetContext()->GetPipelineCache(),
 			graphicsPipelineCreateInfo).value;
 }
 
@@ -278,7 +279,7 @@ void OITPipelineManager::CreateFinalPipeline(bool dithering, bool useBDA)
 	  2                                           // subpass
 	);
 
-	finalPipelines[hash(dithering, useBDA)] = GetContext()->GetDevice().createGraphicsPipelineUnique(GetContext()->GetPipelineCache(), graphicsPipelineCreateInfo).value;
+	finalPipelines[hash(dithering, useBDA)] = easycast_diag::timedPipeline(GetContext()->GetDevice(), GetContext()->GetPipelineCache(), graphicsPipelineCreateInfo).value;
 }
 
 void OITPipelineManager::CreateClearPipeline()
@@ -351,7 +352,7 @@ void OITPipelineManager::CreateClearPipeline()
 	  1                                           // subpass
 	);
 
-	clearPipeline = GetContext()->GetDevice().createGraphicsPipelineUnique(GetContext()->GetPipelineCache(), graphicsPipelineCreateInfo).value;
+	clearPipeline = easycast_diag::timedPipeline(GetContext()->GetDevice(), GetContext()->GetPipelineCache(), graphicsPipelineCreateInfo).value;
 }
 
 void OITPipelineManager::CreateModVolPipeline(ModVolMode mode, int cullMode, bool naomi2)
@@ -462,7 +463,7 @@ void OITPipelineManager::CreateModVolPipeline(ModVolMode mode, int cullMode, boo
 	);
 
 	modVolPipelines[hash(mode, cullMode, naomi2, false)] =
-			GetContext()->GetDevice().createGraphicsPipelineUnique(GetContext()->GetPipelineCache(),
+			easycast_diag::timedPipeline(GetContext()->GetDevice(), GetContext()->GetPipelineCache(),
 					graphicsPipelineCreateInfo).value;
 }
 
@@ -548,7 +549,7 @@ void OITPipelineManager::CreateTrModVolPipeline(ModVolMode mode, int cullMode, b
 	);
 
 	trModVolPipelines[hash(mode, cullMode, naomi2, useBDA)] =
-			GetContext()->GetDevice().createGraphicsPipelineUnique(GetContext()->GetPipelineCache(),
+			easycast_diag::timedPipeline(GetContext()->GetDevice(), GetContext()->GetPipelineCache(),
 					graphicsPipelineCreateInfo).value;
 }
 

@@ -73,8 +73,19 @@ static bool GLSLtoSPV(const vk::ShaderStageFlagBits shaderType, std::string cons
 	const char *shaderStrings[1];
 	shaderStrings[0] = glslShader.data();
 
+	std::string easycastText;
+	const bool easycastSubgroup = glslShader.find("#define EASYCAST_OIT_AGG 1\n") != std::string::npos;
+	if (easycastSubgroup && glslShader.compare(0, 13, "#version 430\n") == 0) {
+		easycastText = "#version 450\n" + glslShader.substr(13);
+		shaderStrings[0] = easycastText.data();
+	}
 	glslang::TShader shader(stage);
 	shader.setStrings(shaderStrings, 1);
+	if (easycastSubgroup) {
+		shader.setEnvInput(glslang::EShSourceGlsl, stage, glslang::EShClientVulkan, 100);
+		shader.setEnvClient(glslang::EShClientVulkan, glslang::EShTargetVulkan_1_1);
+		shader.setEnvTarget(glslang::EShTargetSpv, glslang::EShTargetSpv_1_3);
+	}
 
 	// Enable SPIR-V and Vulkan rules when parsing GLSL
 	EShMessages messages = static_cast<EShMessages>(EShMsgSpvRules | EShMsgVulkanRules);

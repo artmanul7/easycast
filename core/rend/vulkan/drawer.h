@@ -40,6 +40,13 @@ public:
 	}
 
 protected:
+    std::unique_ptr<BufferPacker> uploadPacker;
+    std::vector<u8> uploadNaomiUniforms;
+    BufferPacker& resetUploadPacker() {
+        if (!uploadPacker) uploadPacker = std::make_unique<BufferPacker>();
+        uploadPacker->reset();
+        return *uploadPacker;
+    }
 	VulkanContext *GetContext() const { return VulkanContext::Instance(); }
 	TileClipping SetTileClip(vk::CommandBuffer cmdBuffer, u32 val, vk::Rect2D& clipRect);
 	void SetBaseScissor(const vk::Extent2D& viewport = vk::Extent2D());
@@ -52,6 +59,16 @@ protected:
 			cmdBuffer.setScissor(0, scissor);
 			currentScissor = scissor;
 		}
+	}
+
+	static vk::MemoryPropertyFlags easycastMainMem()
+	{
+		static const bool cached = [] {	// EasyCast 0.2.6: per-frame buffers in CPU-cached memory
+			const char *e = std::getenv("EASYCAST_MAIN_CACHED");
+			return e != nullptr && e[0] == 49;	// 14.11: slower on Mali-G52 -> only with EASYCAST_MAIN_CACHED=1
+		}();
+		return cached ? vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached
+				: vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent;
 	}
 
 	BufferData* GetMainBuffer(u32 size, vk::BufferUsageFlags extraFlags = {})
@@ -71,11 +88,11 @@ protected:
 				while (newSize < size)
 					newSize *= 2;
 				INFO_LOG(RENDERER, "Increasing main buffer size %zd -> %d", buffer->bufferSize, newSize);
-				buffer = new BufferData(newSize, usageFlags);
+				buffer = new BufferData(newSize, usageFlags, easycastMainMem());
 			}
 		}
 		else {
-			buffer = new BufferData(std::max(512 * 1024u, size), usageFlags);
+			buffer = new BufferData(std::max(512 * 1024u, size), usageFlags, easycastMainMem());
 		}
 
 		class BufferHolder : public Deletable

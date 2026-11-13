@@ -21,6 +21,7 @@
 #include "stdclass.h"
 #include "cfg/option.h"
 #include "hw/aica/aica_if.h"
+#include "hw/aica/aica_thread.h"
 #include "imgread/common.h"
 #include "hw/naomi/naomi_cart.h"
 #include "reios/reios.h"
@@ -742,6 +743,7 @@ void Emulator::runInternal()
 
 void Emulator::unloadGame()
 {
+	easycast_savestate_wait();
 	try {
 		stop();
 	} catch (...) { }
@@ -902,6 +904,7 @@ void Emulator::loadstate(Deserializer& deser)
 		custom_texture.terminate();
 		custom_texture.init();
 	}
+	aica::thread::Sync aicaSync;	// the AICA thread must not run while its state is replaced
 #if FEAT_AREC == DYNAREC_JIT
 	aica::arm::recompiler::flush();
 #endif

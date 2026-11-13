@@ -94,6 +94,8 @@ static void gui_settings_advanced()
     header(T("Other"));
     {
     	OptionCheckbox(T("HLE BIOS"), config::UseReios, T("Force high-level BIOS emulation"));
+	OptionCheckbox(T("GD-ROM Fast Loading (inaccurate)"), config::FastGDRomLoad,
+			T("Disc data reaches the game much faster than on a real Dreamcast. Can shorten loading and late models, but some games may misbehave (e.g. music cut on loading screens). Use per-game settings."));
         OptionCheckbox(T("Multi-threaded emulation"), config::ThreadedRendering,
         		T("Run the emulated CPU and GPU on different threads"));
 #if !defined(__ANDROID) && !defined(GDB_SERVER)

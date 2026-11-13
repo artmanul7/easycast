@@ -135,6 +135,18 @@ void sh4_sched_request(int id, int cycles)
 			sched.end++;
 	}
 
+	// Changing a later event cannot change the minimum deadline. Validate the
+	// cached minimum first: callbacks may have consumed it during dispatch.
+	if (sh4_sched_next_id >= 0 && sh4_sched_next_id != id && Sh4cntx.sh4_sched_next >= 0)
+	{
+		const sched_list& next = sch_list[sh4_sched_next_id];
+		const u32 remaining = u32(sched.end) - u32(sched.start);
+		if (next.end != -1 && u32(next.end) - u32(sched.start) == u32(Sh4cntx.sh4_sched_next)
+				&& (sched.end == -1 || remaining > u32(Sh4cntx.sh4_sched_next)
+						|| (remaining == u32(Sh4cntx.sh4_sched_next) && id > sh4_sched_next_id)))
+			return;
+	}
+
 	sh4_sched_ffts();
 }
 

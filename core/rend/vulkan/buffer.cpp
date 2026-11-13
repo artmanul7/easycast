@@ -43,6 +43,12 @@ BufferData::BufferData(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::Memo
 		if (propertyFlags & vk::MemoryPropertyFlagBits::eHostVisible)
 		{
 			allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+			static const bool easycastPersist = [] {	// EasyCast 0.2.6: keep host-visible buffers mapped
+				const char *e = std::getenv("EASYCAST_PERSIST_MAP");
+				return !(e != nullptr && e[0] == '0');
+			}();
+			if (easycastPersist)
+				allocInfo.flags |= VMA_ALLOCATION_CREATE_MAPPED_BIT;
 			if (propertyFlags & vk::MemoryPropertyFlagBits::eHostCached)
 				allocInfo.preferredFlags |= VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
 			if (propertyFlags & vk::MemoryPropertyFlagBits::eHostCoherent)
@@ -50,10 +56,29 @@ BufferData::BufferData(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::Memo
 		}
 	}
 	allocation = context->GetAllocator().AllocateForBuffer(*buffer, allocInfo);
+	if (propertyFlags & vk::MemoryPropertyFlagBits::eHostVisible)
+	{
+		static u32 loggedMask = 0;	// one line per distinct memory type
+		const u32 bit = 1u << (allocation.MemoryFlags() & 31);
+		if ((loggedMask & bit) == 0)
+		{
+			loggedMask |= bit;
+			std::fprintf(stderr, "EASYCAST_UPLOAD memory_flags=0x%x persistent=%d\n", allocation.MemoryFlags(),
+					(allocInfo.flags & VMA_ALLOCATION_CREATE_MAPPED_BIT) ? 1 : 0);
+		}
+	}
 }
 
 BufferPacker::BufferPacker()
 {
+	reset();
+}
+
+void BufferPacker::reset()
+{
+	offset = 0;
+	chunks.clear();
+	chunkSizes.clear();
 	uniformAlignment = VulkanContext::Instance()->GetUniformBufferAlignment();
 	storageAlignment = VulkanContext::Instance()->GetStorageBufferAlignment();
 }

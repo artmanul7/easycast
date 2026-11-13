@@ -20,6 +20,65 @@
 #include "gui.h"
 #include "wsi/context.h"
 
+namespace config { Option<int> EasycastScreen("easycast.Screen", 0); }
+namespace config { Option<int, false> EasycastBrightness("easycast.Brightness", 0); }	// EasyCast 0.2.8
+
+#include "easycast_bright.h"
+#include "oslib/oslib.h"
+#include "emulator.h"
+#include <algorithm>
+#include <cstdio>
+#include <string>
+
+namespace easycast_bright {
+static std::string panelPath(const char *file)
+{
+	return std::string("/sys/class/backlight/") + (config::EasycastScreen == 1 ? "backlight0/" : "backlight1/") + file;
+}
+
+static int readInt(const std::string &path)
+{
+	int v = -1;
+	if (FILE *f = std::fopen(path.c_str(), "r")) {
+		if (std::fscanf(f, "%d", &v) != 1) v = -1;
+		std::fclose(f);
+	}
+	return v;
+}
+
+int readPct()
+{
+	const int mx = readInt(panelPath("max_brightness")), cur = readInt(panelPath("brightness"));
+	if (mx <= 0 || cur < 0) return 0;
+	return std::clamp((cur * 100 + mx / 2) / mx, 1, 100);
+}
+
+void set(int pct)
+{
+	pct = std::clamp(pct, 5, 100);
+	config::EasycastBrightness = pct;
+	const int mx = readInt(panelPath("max_brightness"));
+	if (mx <= 0) return;
+	if (FILE *f = std::fopen(panelPath("brightness").c_str(), "w")) {
+		std::fprintf(f, "%d", std::max(1, mx * pct / 100));
+		std::fclose(f);
+	}
+}
+
+void step(int dir)
+{
+	int pct = config::EasycastBrightness > 0 ? (int)config::EasycastBrightness : readPct();
+	if (pct <= 0) pct = 50;
+	if (dir > 0) pct = pct < 10 ? 10 : std::min(100, pct / 10 * 10 + 10);
+	else pct = pct <= 10 ? 5 : (pct + 9) / 10 * 10 - 10;
+	set(pct);
+	SaveSettings();
+	char msg[48];
+	std::snprintf(msg, sizeof(msg), "Brightness %d%%", pct);
+	os_notify(msg, 1200);
+}
+}
+
 enum RenderAPI {
 	OpenGL,
 	Vulkan,
@@ -29,6 +88,19 @@ enum RenderAPI {
 
 void gui_settings_video()
 {
+    if (getenv("EASYCAST_DRM_PRESENT")) {
+        int selectedScreen = config::EasycastScreen;
+        if (ImGui::Combo("Screen (restart EasyCast)", &selectedScreen, "Top\0Bottom\0"))
+            config::EasycastScreen = selectedScreen;
+        int bright = config::EasycastBrightness > 0 ? (int)config::EasycastBrightness : easycast_bright::readPct();	// EasyCast 0.2.8
+        if (bright <= 0) bright = 50;
+        if (ImGui::SliderInt("Screen brightness", &bright, 5, 100, "%d%%"))
+            easycast_bright::set(bright);
+        ImGui::SameLine();
+        ShowHelpMarker("Brightness of the screen the game is on. In game: Select + D-Pad Up / Down. "
+                "The menu of the handheld keeps its own brightness.");
+    }
+
 	int renderApi;
 	bool perPixel;
 	switch (config::RendererType)
@@ -152,8 +224,8 @@ void gui_settings_video()
 
     header(T("Rendering Options"));
     {
-        const std::array<float, 13> scalings{ 0.5f, 1.f, 1.5f, 2.f, 2.5f, 3.f, 4.f, 4.5f, 5.f, 6.f, 7.f, 8.f, 9.f };
-        const std::array<std::string, 13> scalingsText{ T("Half"), T("Native"), "x1.5", "x2", "x2.5", "x3", "x4", "x4.5", "x5", "x6", "x7", "x8", "x9" };
+        const std::array<float, 15> scalings{ 0.25f, 0.5f, 0.75f, 1.f, 1.5f, 2.f, 2.5f, 3.f, 4.f, 4.5f, 5.f, 6.f, 7.f, 8.f, 9.f };
+        const std::array<std::string, 15> scalingsText{ "x0.25", T("Half"), "x0.75", T("Native"), "x1.5", "x2", "x2.5", "x3", "x4", "x4.5", "x5", "x6", "x7", "x8", "x9" };
         std::array<int, scalings.size()> vres;
         std::array<std::string, scalings.size()> resLabels;
         u32 selected = 0;
@@ -259,8 +331,8 @@ void gui_settings_video()
 		ImGui::Spacing();
 		header(T("Per Pixel Settings"));
 
-		const std::array<int64_t, 4> bufSizes{ 512_MB, 1_GB, 2_GB, 4_GB };
-		const std::array<std::string, 4> bufSizesText{ T("512 MB"), T("1 GB"), T("2 GB"), T("4 GB") };
+		const std::array<int64_t, 4> bufSizes{ 32_MB, 64_MB, 128_MB, 256_MB };
+		const std::array<std::string, 4> bufSizesText{ T("32 MB"), T("64 MB"), T("128 MB"), T("256 MB") };
         ImGui::PushItemWidth(ImGui::CalcItemWidth() - innerSpacing * 2.0f - ImGui::GetFrameHeight() * 2.0f);
 		u32 selected = 0;
 		for (; selected < bufSizes.size(); selected++)

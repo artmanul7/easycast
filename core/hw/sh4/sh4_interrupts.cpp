@@ -17,6 +17,7 @@
 #include "debug/gdb_server.h"
 #include "serialize.h"
 #include <cassert>
+#include <cstdio>
 
 //these are fixed
 const u16 IRLPriority = 0x0246;
@@ -196,12 +197,45 @@ static void Do_Interrupt(Sh4ExceptionCode intEvn)
 	debugger::subroutineCall();
 }
 
+// Fixed-size history; no file writes or allocations until a fatal exception.
+struct EasycastSh4ExceptionRecord {
+	u32 epc, event, pc, sr, ssr, spc, vbr, tea, oldEvent, interrupt;
+};
+static thread_local EasycastSh4ExceptionRecord easycastExceptions[16]{};
+static thread_local unsigned easycastExceptionNext = 0, easycastExceptionCount = 0;
+static void easycastRecordException(u32 epc, Sh4ExceptionCode event)
+{
+	auto &r = easycastExceptions[easycastExceptionNext];
+	r = {epc, static_cast<u32>(event), Sh4cntx.pc, Sh4cntx.sr.getFull(),
+		Sh4cntx.ssr, Sh4cntx.spc, Sh4cntx.vbr, CCN_TEA, CCN_EXPEVT, CCN_INTEVT};
+	easycastExceptionNext = (easycastExceptionNext + 1) % 16;
+	if (easycastExceptionCount < 16) ++easycastExceptionCount;
+}
+static void easycastDumpBlockedException()
+{
+	std::fprintf(stderr, "EASYCAST_SH4_BLOCKED history=%u\n", easycastExceptionCount);
+	for (unsigned i = 0; i < easycastExceptionCount; ++i)
+	{
+		const auto &r = easycastExceptions[(easycastExceptionNext + 16 - easycastExceptionCount + i) % 16];
+		std::fprintf(stderr, "EASYCAST_SH4_EXCEPTION n=%u epc=%08x event=%03x pc=%08x sr=%08x ssr=%08x spc=%08x vbr=%08x tea=%08x previous_event=%03x interrupt=%03x\n",
+			i, r.epc, r.event, r.pc, r.sr, r.ssr, r.spc, r.vbr, r.tea, r.oldEvent, r.interrupt);
+	}
+	std::fprintf(stderr, "EASYCAST_SH4_REGS pr=%08x gbr=%08x fpscr=%08x", Sh4cntx.pr, Sh4cntx.gbr, Sh4cntx.fpscr.full);
+	for (unsigned i = 0; i < 16; ++i) std::fprintf(stderr, " r%u=%08x", i, Sh4cntx.r[i]);
+	std::fprintf(stderr, "\n");
+	std::fflush(stderr);
+}
+
 void Do_Exception(u32 epc, Sh4ExceptionCode expEvn)
 {
 	assert((expEvn >= Sh4Ex_TlbMissRead && expEvn <= Sh4Ex_SlotIllegalInstr)
 			|| expEvn == Sh4Ex_FpuDisabled || expEvn == Sh4Ex_SlotFpuDisabled || expEvn == Sh4Ex_UserBreak);
+	easycastRecordException(epc, expEvn);
 	if (Sh4cntx.sr.BL != 0)
+	{
+		easycastDumpBlockedException();
 		throw FlycastException("Fatal: SH4 exception when blocked");
+	}
 	CCN_EXPEVT = expEvn;
 
 	Sh4cntx.ssr = Sh4cntx.sr.getFull();

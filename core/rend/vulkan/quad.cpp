@@ -19,6 +19,7 @@
     along with Flycast.  If not, see <https://www.gnu.org/licenses/>.
 */
 #include "quad.h"
+#include "easycast_diag.h"
 #include "vulkan_context.h"
 
 #include <memory>
@@ -126,7 +127,7 @@ void QuadPipeline::CreatePipeline()
 	  subpass                                     // subpass
 	);
 
-	pipeline = GetContext()->GetDevice().createGraphicsPipelineUnique(GetContext()->GetPipelineCache(), graphicsPipelineCreateInfo).value;
+	pipeline = easycast_diag::timedPipeline(GetContext()->GetDevice(), GetContext()->GetPipelineCache(), graphicsPipelineCreateInfo).value;
 }
 
 void QuadPipeline::Init(ShaderManager *shaderManager, vk::RenderPass renderPass, int subpass)

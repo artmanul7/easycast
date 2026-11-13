@@ -14,6 +14,7 @@
 #include <unistd.h>
 #ifdef __linux__
 #include <pthread.h>
+#include "oslib/easycast_pin.h"
 #endif
 
 #include "oslib/host_context.h"
@@ -154,9 +155,10 @@ static void linux_fix_personality()
 }
 
 #if defined(__unix__) && !defined(LIBRETRO) && !defined(__ANDROID__)
+volatile sig_atomic_t easycastExitRequested = 0;
 static void sigintHandler(int)
 {
-	dc_exit();
+	easycastExitRequested = 1;
 }
 #endif
 
@@ -187,6 +189,7 @@ void os_SetThreadName(const char *name)
 		name = tmp;
 	}
 	pthread_setname_np(pthread_self(), name);
+	easycast_pin::apply(name);
 #endif
 }
 

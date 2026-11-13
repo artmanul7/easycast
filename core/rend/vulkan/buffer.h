@@ -22,6 +22,9 @@
 #include "vulkan.h"
 #include "vmallocator.h"
 #include "utils.h"
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
 
 struct BufferData
 {
@@ -48,6 +51,7 @@ struct BufferData
 		for (size_t i = 0; i < count; i++)
 			totalSize += sizes[i];
 		verify(bufOffset + totalSize <= bufferSize);
+		const auto easycastT0 = std::chrono::steady_clock::now();	// EasyCast: packed upload timing
 		void* dataPtr = (u8 *)allocation.MapMemory() + bufOffset;
 		for (size_t i = 0; i < count; i++)
 		{
@@ -55,7 +59,25 @@ struct BufferData
 				memcpy(dataPtr, data[i], sizes[i]);
 			dataPtr = (u8 *)dataPtr + sizes[i];
 		}
-		allocation.UnmapMemory();
+		if (allocation.IsPersistent())
+			allocation.Flush(bufOffset, totalSize);	// EasyCast: only the written range
+		else
+			allocation.UnmapMemory();
+		easycastUploadStat(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - easycastT0).count(), totalSize);
+	}
+
+	static void easycastUploadStat(long long us, u32 bytes)
+	{
+		static long long sum = 0, mx = 0, kb = 0, n = 0;
+		static auto t0 = std::chrono::steady_clock::now();
+		sum += us; kb += bytes / 1024; n++; if (us > mx) mx = us;
+		auto now = std::chrono::steady_clock::now();
+		if (now - t0 >= std::chrono::seconds(5))
+		{
+			std::fprintf(stderr, "EASYCAST_UPLOAD calls=%lld avg_us=%lld max_us=%lld kb_avg=%lld\n", n, n ? sum / n : 0, mx, n ? kb / n : 0);
+			sum = mx = kb = n = 0;
+			t0 = now;
+		}
 	}
 
 	void download(u32 size, void *data, u32 bufOffset = 0) const
@@ -88,6 +110,7 @@ class BufferPacker
 {
 public:
 	BufferPacker();
+	void reset();
 
 	vk::DeviceSize addUniform(const void *p, size_t size) {
 		return add(p, size, uniformAlignment);

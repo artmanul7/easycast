@@ -20,6 +20,8 @@
 */
 #pragma once
 #include "../vulkan.h"
+#include "../easycast_desc.h"
+#include "../easycast_pipes.h"
 #include "oit_shaders.h"
 #include "oit_renderpass.h"
 #include "oit_buffer.h"
@@ -99,6 +101,7 @@ public:
 	{
 		perFrameDescSet = perFrameAlloc.alloc();
 		perPolyDescSets.clear();
+		texDescSets.clear();
 
 		std::vector<vk::DescriptorBufferInfo> bufferInfos;
 		bufferInfos.emplace_back(buffer, vertexUniformOffset, sizeof(VertexShaderUniforms));
@@ -154,9 +157,53 @@ public:
 		getContext()->GetDevice().updateDescriptorSets(writeDescriptorSet, nullptr);
 	}
 
+	vk::DescriptorSet easycastBound;	// EasyCast: per-poly set bound last in this draw list
+	void easycastResetBound() { easycastBound = vk::DescriptorSet(); }
+
 	void bindPerPolyDescriptorSets(vk::CommandBuffer cmdBuffer, const PolyParam& poly, int polyNumber, vk::Buffer buffer,
 			vk::DeviceSize uniformOffset, vk::DeviceSize lightOffset, bool punchThrough)
 	{
+		if (!poly.isNaomi2() && easycastShareDescSets())
+		{
+			EasycastTexKey key {};
+			vk::DescriptorImageInfo info0, info1;
+			if (poly.texture != nullptr)
+			{
+				info0 = vk::DescriptorImageInfo{ samplerManager->GetSampler(poly, punchThrough, false),
+						((Texture *)poly.texture)->GetReadOnlyImageView(), vk::ImageLayout::eShaderReadOnlyOptimal };
+				key.s0 = (uint64_t)(VkSampler)info0.sampler;
+				key.v0 = (uint64_t)(VkImageView)info0.imageView;
+			}
+			if (poly.texture1 != nullptr)
+			{
+				info1 = vk::DescriptorImageInfo{ samplerManager->GetSampler(poly, punchThrough, true),
+						((Texture *)poly.texture1)->GetReadOnlyImageView(), vk::ImageLayout::eShaderReadOnlyOptimal };
+				key.s1 = (uint64_t)(VkSampler)info1.sampler;
+				key.v1 = (uint64_t)(VkImageView)info1.imageView;
+			}
+			vk::DescriptorSet set;
+			auto jt = texDescSets.find(key);
+			if (jt == texDescSets.end())
+			{
+				set = perPolyAlloc.alloc();
+				std::vector<vk::WriteDescriptorSet> w;
+				if (poly.texture != nullptr)
+					w.emplace_back(set, 0, 0, vk::DescriptorType::eCombinedImageSampler, info0);
+				if (poly.texture1 != nullptr)
+					w.emplace_back(set, 1, 0, vk::DescriptorType::eCombinedImageSampler, info1);
+				if (!w.empty())
+					getContext()->GetDevice().updateDescriptorSets(w, nullptr);
+				texDescSets[key] = set;
+			}
+			else
+				set = jt->second;
+			if (set != easycastBound)
+			{
+				cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 1, set, nullptr);
+				easycastBound = set;
+			}
+			return;
+		}
 		vk::DescriptorSet perPolyDescSet;
 		auto it = perPolyDescSets.find(&poly);
 		if (it == perPolyDescSets.end())
@@ -198,6 +245,7 @@ public:
 		}
 		else
 			perPolyDescSet = it->second;
+		easycastBound = vk::DescriptorSet();
 		cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 1, perPolyDescSet, nullptr);
 	}
 
@@ -221,6 +269,7 @@ public:
 		}
 		else
 			perPolyDescSet = it->second;
+		easycastBound = vk::DescriptorSet();
 		cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 1, perPolyDescSet, nullptr);
 	}
 
@@ -240,6 +289,7 @@ public:
 		colorInputDescSets[0] = vk::DescriptorSet{};
 		colorInputDescSets[1] = vk::DescriptorSet{};
 		perPolyDescSets.clear();
+		texDescSets.clear();
 		perFrameAlloc.nextFrame();
 		perPolyAlloc.nextFrame();
 		colorInputAlloc.nextFrame();
@@ -263,6 +313,7 @@ private:
 	DynamicDescSetAlloc colorInputAlloc;
 	vk::DescriptorSet perFrameDescSet = {};
 	std::unordered_map<const void *, vk::DescriptorSet> perPolyDescSets;
+	std::unordered_map<EasycastTexKey, vk::DescriptorSet, EasycastTexKeyHash> texDescSets;
 
 	SamplerManager* samplerManager;
 };
@@ -336,6 +387,15 @@ public:
 		if (pipeline != pipelines.end())
 			return pipeline->second.get();
 
+		easycast_pipes::preload(1, this, [&](const easycast_pipes::Rec &r, const PolyParam &p) {
+			if (pipelines.count(hash(r.listType, r.sort, &p, (Pass)r.pass, r.gpuPalette, useBDA)))
+				return false;
+			CreatePipeline(r.listType, r.sort, p, (Pass)r.pass, r.gpuPalette, useBDA);
+			return true;
+		});
+		if (pipelines.count(pipehash))
+			return *pipelines[pipehash];
+		easycast_pipes::record(1, easycast_pipes::fromPoly(listType, autosort, (u32)pass, gpuPalette, 0, pp), pp.isNaomi2());
 		CreatePipeline(listType, autosort, pp, pass, gpuPalette, useBDA);
 
 		return *pipelines[pipehash];

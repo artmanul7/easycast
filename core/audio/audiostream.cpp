@@ -1,6 +1,7 @@
 #include "audiostream.h"
 #include "cfg/option.h"
 #include "emulator.h"
+#include "easycast_diag.h"
 
 static void registerForEvents();
 
@@ -55,8 +56,10 @@ void WriteSample(s16 r, s16 l)
 
 	if (++writePtr == SAMPLE_COUNT)
 	{
-		if (currentBackend != nullptr)
+		if (currentBackend != nullptr) {
+			easycast_diag::AudioScope easycastAudio;
 			currentBackend->push(Buffer, SAMPLE_COUNT, config::LimitFPS);
+		}
 		writePtr = 0;
 	}
 }

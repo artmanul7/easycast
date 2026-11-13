@@ -19,6 +19,7 @@
  */
 
 #include "sgc_if.h"
+#include "aica_thread.h"
 #include "aica.h"
 #include "aica_if.h"
 #include "aica_mem.h"
@@ -133,6 +134,8 @@ static T FPMul(T a, T b, int bits) {
 
 static void VolumePan(SampleType value, u32 vol, u32 pan, SampleType& outl, SampleType& outr)
 {
+	if (value == 0)
+		return;
 	SampleType temp = FPMul(value, volume_lut[vol], 15);
 	SampleType Sc = FPMul(temp, volume_lut[0xF - (pan & 0xF)], 15);
 	if (pan & 0x10)
@@ -703,7 +706,8 @@ struct ChannelEx
 	{
 		SampleType oLeft, oRight, oDsp;
 
-		Step(oLeft, oRight, oDsp);
+		if (!Step(oLeft, oRight, oDsp))
+			return;
 
 		*VolMix.DSPOut += oDsp;
 		if (oLeft + oRight == 0 && !config::DSPEnabled)
@@ -1542,6 +1546,7 @@ void ReadCommonReg(u32 reg,bool byte)
 
 void vmuBeep(int on, int period)
 {
+	thread::Sync sync;
 	beep.update(on, period);
 }
 
@@ -1564,7 +1569,10 @@ void AICA_Sample()
 	if (cdda_index >= CDDA_SIZE)
 	{
 		cdda_index = 0;
-		libCore_CDDA_Sector(cdda_sector);
+		if (thread::active())
+			thread::cddaSector(cdda_sector);	// read ahead on the SH4 thread
+		else
+			libCore_CDDA_Sector(cdda_sector);
 	}
 	s32 EXTS0L = cdda_sector[cdda_index];
 	s32 EXTS0R = cdda_sector[cdda_index+1];

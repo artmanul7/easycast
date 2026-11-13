@@ -1,3 +1,5 @@
+#include <csignal>
+extern volatile sig_atomic_t easycastExitRequested;
 /*
 	Copyright 2020 flyinghead
 
@@ -103,6 +105,7 @@ void mainui_loop(bool forceStart)
 
 	while (mainui_enabled)
 	{
+		if (easycastExitRequested) { easycastExitRequested = 0; dc_exit(); break; }
 		fc_profiler::startThread("main");
 
 		if (mainui_rend_frame() && imguiDriver != nullptr)

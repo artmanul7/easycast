@@ -138,6 +138,10 @@ shil_compile( \
 
 #if SHIL_MODE==1
 
+#if defined(__aarch64__)
+#include "ftrv_aarch64.h"
+#endif
+
 template<int Stride = 1>
 static inline float innerProduct(const float *f1, const float *f2)
 {
@@ -925,6 +929,9 @@ shil_canonical
 (
 void,f1,(float *fd, const float *fn, const float *fm),
 
+#if defined(__aarch64__)
+	ftrvAarch64(fd, fn, fm);
+#else
 	float v1 = innerProduct<4>(fn, fm);
 	float v2 = innerProduct<4>(fn, fm + 1);
 	float v3 = innerProduct<4>(fn, fm + 2);
@@ -933,6 +940,7 @@ void,f1,(float *fd, const float *fn, const float *fm),
 	fd[1] = v2;
 	fd[2] = v3;
 	fd[3] = v4;
+#endif
 )
 
 shil_compile

@@ -58,6 +58,8 @@ enum DreamcastKey
 	EMU_BTN_BYPASS_KB,
 	EMU_BTN_SCREENSHOT,
 	EMU_BTN_SRVMODE,		// used internally by virtual gamepad
+	EMU_BTN_BRIGHT_UP,		// EasyCast 0.2.8: brightness of the game screen (Select + Up)
+	EMU_BTN_BRIGHT_DOWN,	// EasyCast 0.2.8: (Select + Down)
 
 	// Real axes
 	DC_AXIS_TRIGGERS	= 0x1000000,

@@ -44,6 +44,7 @@ using namespace vixl::aarch64;
 #include "hw/mem/addrspace.h"
 #include "oslib/virtmem.h"
 #include "emulator.h"
+#include "hw/sh4/dyna/easycast_idle.h"
 
 struct DynaRBI : RuntimeBlockInfo
 {
@@ -74,6 +75,8 @@ static DynaCode *linkBlockBranchStub;
 static DynaCode *linkBlockNextStub;
 static DynaCode *writeStoreQueue32;
 static DynaCode *writeStoreQueue64;
+static DynaCode *memoryReadStub[4];
+static DynaCode *memoryWriteStub[4];
 
 static void jitWriteProtect(Sh4CodeBuffer &codeBuffer, bool enable)
 {
@@ -165,7 +168,14 @@ public:
 		Operand op3 = Operand(0);
 		if (op->rs2.is_imm())
 		{
-			op3 = Operand(op->rs2._imm);
+			// Add/Sub operate on 32-bit registers with LeaveFlags. Sign extending
+			// a SHIL u32 constant preserves the modulo-2^32 result and lets VIXL
+			// encode add(-n) as sub(n), instead of materialising a large u32.
+			if (arm_op == nullptr)
+				op3 = Operand(static_cast<s64>(op->rs2._imm) -
+					((op->rs2._imm & 0x80000000U) ? 0x100000000LL : 0));
+			else
+				op3 = Operand(op->rs2._imm);
 		}
 		else if (op->rs2.is_r32i())
 		{
@@ -909,6 +919,14 @@ public:
 				}
 				break;
 
+            case shop_fipr:
+                GenFipr(regalloc.MapVRegister(op.rd), op.rs1.reg_offset(), op.rs2.reg_offset());
+                break;
+
+            case shop_ftrv:
+                GenFtrv(op.rd.reg_offset(), op.rs1.reg_offset(), op.rs2.reg_offset());
+                break;
+
 			/* fall back to the canonical implementations for better precision
 			case shop_fipr:
 				Add(x9, x28, op.rs1.reg_offset());
@@ -988,6 +1006,87 @@ public:
 		jitWriteProtect(codeBuffer, true);
 	}
 
+
+    void GenContextPointer(const Register& target, u32 offset)
+    {
+        Add(target, x28, offset);
+    }
+
+    void GenFipr(const VRegister& result, u32 aOffset, u32 bOffset)
+    {
+        // Input vectors were written back by the register allocator before
+        // this vector operation. Only caller-scratch FP registers are used.
+        Ldp(s0, s1, MemOperand(x28, aOffset));
+        Ldp(s2, s3, MemOperand(x28, aOffset + 8));
+        Ldp(s4, s5, MemOperand(x28, bOffset));
+        Ldp(s6, s7, MemOperand(x28, bOffset + 8));
+        Fcvt(d0, s0); Fcvt(d1, s1); Fcvt(d2, s2); Fcvt(d3, s3);
+        Fcvt(d4, s4); Fcvt(d5, s5); Fcvt(d6, s6); Fcvt(d7, s7);
+        // Match the original GCC helper's contraction order, including NaNs.
+        // Products of two float inputs are exact in double precision.
+        Fmul(d1, d1, d5);
+        Fmadd(d0, d0, d4, d1);
+        Fmadd(d0, d2, d6, d0);
+        Fmadd(d0, d3, d7, d0);
+        Fcvt(result, d0);
+#ifdef STRICT_MODE
+        Label notNaN;
+        Fcmp(result, result);
+        B(vc, &notNaN);
+        Mov(w0, 0x7fbfffff);
+        Fmov(result, w0);
+        Bind(&notNaN);
+#endif
+    }
+
+
+    void GenDispatchBase()
+    {
+        // In non-MMU execution x27 already points just past the context.
+        constexpr uint64_t delta = offsetof(Sh4RCB, cntx) + sizeof(Sh4Context);
+        if ((delta & 0xffff) == 0 && delta <= 0xffff0000ULL) {
+            Mov(w2, delta);
+            Sub(x2, x27, x2);
+        } else {
+            Sub(x2, x28, offsetof(Sh4RCB, cntx));
+        }
+    }
+
+    void GenFtrv(u32 outputOffset, u32 inputOffset, u32 matrixOffset)
+    {
+        Ldr(q0, MemOperand(x28, inputOffset));
+        Fcvtl(v16.V2D(), v0.V2S());
+        Fcvtl2(v17.V2D(), v0.V4S());
+        // Match the original helper's first contracted pair, then rows 2/3.
+        const int rows[] = {1, 0, 2, 3};
+        for (int k = 0; k < 4; ++k) {
+            int row = rows[k];
+            Ldr(q1, MemOperand(x28, matrixOffset + row * 16));
+            Fcvtl(v2.V2D(), v1.V2S());
+            Fcvtl2(v3.V2D(), v1.V4S());
+            const VRegister& input = row < 2 ? d16 : d17;
+            if (k == 0) {
+                Fmul(v4.V2D(), v2.V2D(), input, row & 1);
+                Fmul(v5.V2D(), v3.V2D(), input, row & 1);
+            } else {
+                Fmla(v4.V2D(), v2.V2D(), input, row & 1);
+                Fmla(v5.V2D(), v3.V2D(), input, row & 1);
+            }
+        }
+        Fcvtn(v4.V2S(), v4.V2D());
+        Fcvtn(v5.V2S(), v5.V2D());
+#ifdef STRICT_MODE
+        Mov(w0, 0x7fbfffff);
+        Dup(v7.V2S(), w0);
+        Fcmeq(v6.V2S(), v4.V2S(), v4.V2S());
+        Bif(v4.V8B(), v7.V8B(), v6.V8B());
+        Fcmeq(v6.V2S(), v5.V2S(), v5.V2S());
+        Bif(v5.V8B(), v7.V8B(), v6.V8B());
+#endif
+        // All inputs have been consumed, so output/input aliases are safe.
+        Stp(d4, d5, MemOperand(x28, outputOffset));
+    }
+
 	void canonStart(const shil_opcode *op)
 	{
 		CC_pars.clear();
@@ -1054,11 +1153,11 @@ public:
 			case CPT_ptr:
 				verify(prm.is_reg());
 				// push the ptr itself
-				Mov(*call_regs64[regused++], reinterpret_cast<uintptr_t>(prm.reg_ptr(sh4ctx)));
+				GenContextPointer(*call_regs64[regused++], prm.reg_offset());
 				break;
 
 			case CPT_sh4ctx:
-				Mov(*call_regs64[regused++], reinterpret_cast<uintptr_t>(&sh4ctx));
+				GenContextPointer(*call_regs64[regused++], 0);
 				break;
 
 			case CPT_u32rv:
@@ -1102,19 +1201,19 @@ public:
 		switch (size)
 		{
 		case 1:
-			GenCallRuntime(addrspace::read8SX32);
+			GenCall(memoryReadStub[0]);
 			break;
 
 		case 2:
-			GenCallRuntime(addrspace::read16SX32);
+			GenCall(memoryReadStub[1]);
 			break;
 
 		case 4:
-			GenCallRuntime(addrspace::read32);
+			GenCall(memoryReadStub[2]);
 			break;
 
 		case 8:
-			GenCallRuntime(addrspace::read64);
+			GenCall(memoryReadStub[3]);
 			break;
 
 		default:
@@ -1124,28 +1223,29 @@ public:
 		EnsureCodeSize(start_instruction, read_memory_rewrite_size);
 	}
 
-	void GenWriteMemorySlow(u32 size)
+	void GenWriteMemorySlow(u32 size, bool zeroValue = false)
 	{
 		Instruction *start_instruction = GetCursorAddress<Instruction *>();
 
+		if (zeroValue) Mov(w1, wzr);
 		switch (size)
 		{
 		case 1:
-			Uxtb(w1, w1);
-			GenCallRuntime(addrspace::write8);
+			if (!zeroValue) Uxtb(w1, w1);
+			GenCall(memoryWriteStub[0]);
 			break;
 
 		case 2:
-			Uxth(w1, w1);
-			GenCallRuntime(addrspace::write16);
+			if (!zeroValue) Uxth(w1, w1);
+			GenCall(memoryWriteStub[1]);
 			break;
 
 		case 4:
-			GenCallRuntime(addrspace::write32);
+			GenCall(memoryWriteStub[2]);
 			break;
 
 		case 8:
-			GenCallRuntime(addrspace::write64);
+			GenCall(memoryWriteStub[3]);
 			break;
 
 		default:
@@ -1209,7 +1309,13 @@ public:
 				// if (*jdyn == 0)
 				//   next_pc = branch_pc_value;
 
-				if (block->has_jcond)
+				static const bool easycastJcondReg = [] {
+					const char *e = getenv("EASYCAST_JCOND_REG");
+					return !(e != nullptr && e[0] == 48);	// 0.2.7: on (user decision 14.11), EASYCAST_JCOND_REG=0 off
+				}();
+				if (block->has_jcond && easycastJcondReg)
+					Mov(w11, w29);	// EasyCast 0.2.7: shop_jcond left the condition in w29
+				else if (block->has_jcond)
 					Ldr(w11, sh4_context_mem_operand(&sh4ctx.jdyn));
 				else
 					Ldr(w11, sh4_context_mem_operand(&sh4ctx.sr.T));
@@ -1289,15 +1395,17 @@ public:
 			{
 				ptrdiff_t start = GetBuffer()->GetCursorOffset();
 				// TODO Call no_update instead (and check CpuRunning less frequently?)
-				Sub(x2, x28, offsetof(Sh4RCB, cntx));	// 3 ops
+				GenDispatchBase();
 				if (RAM_SIZE == 32_MB)
 					Ubfx(w1, w29, 1, 24);
 				else
 					Ubfx(w1, w29, 1, 23);
 				Ldr(x15, MemOperand(x2, x1, LSL, 3));	// Get block entry point
 				Br(x15);
-				// sadly no any easy way to check this at compile time
-				verify(GetBuffer()->GetCursorOffset() - start == 6 * 4);
+                // Keep the relink slot layout; padding follows the branch.
+                while (GetBuffer()->GetCursorOffset() - start < 6 * 4)
+                    Nop();
+                verify(GetBuffer()->GetCursorOffset() - start == 6 * 4);
 			}
 			else
 			{
@@ -1457,8 +1565,10 @@ public:
 		}
 		else
 		{
-			// Use x28 as sh4 context pointer
+			// Use x28 as sh4 context pointer. x27 is callee-saved and
+			// otherwise unused without MMU: keep the direct memory base here.
 			Mov(x28, x0);
+			Add(x27, x28, sizeof(Sh4Context));
 		}
 		Label do_interrupts;
 
@@ -1519,7 +1629,7 @@ public:
 		Ldr(w0, sh4_context_mem_operand(&sh4ctx.CpuRunning));
 		Cbz(w0, &end_mainloop);
 		Mov(x29, lr);				// Save link register in case we return
-		GenCallRuntime(UpdateSystem_INTC);
+		GenCallRuntime(easycast_idle::UpdateSystem);
 		Cbnz(w0, &do_interrupts);
 		Mov(lr, x29);
 		Ldr(w0, sh4_context_mem_operand(&sh4ctx.cycle_counter));
@@ -1617,6 +1727,25 @@ public:
 		Str(x1, MemOperand(x28, x0));
 		Ret();
 
+
+		// Shared tail-call stubs keep fault-rewrite slots to three instructions.
+		memoryReadStub[0] = GetCursorAddress<DynaCode *>();
+		GenBranchRuntime(addrspace::read8SX32);
+		memoryReadStub[1] = GetCursorAddress<DynaCode *>();
+		GenBranchRuntime(addrspace::read16SX32);
+		memoryReadStub[2] = GetCursorAddress<DynaCode *>();
+		GenBranchRuntime(addrspace::read32);
+		memoryReadStub[3] = GetCursorAddress<DynaCode *>();
+		GenBranchRuntime(addrspace::read64);
+		memoryWriteStub[0] = GetCursorAddress<DynaCode *>();
+		GenBranchRuntime(addrspace::write8);
+		memoryWriteStub[1] = GetCursorAddress<DynaCode *>();
+		GenBranchRuntime(addrspace::write16);
+		memoryWriteStub[2] = GetCursorAddress<DynaCode *>();
+		GenBranchRuntime(addrspace::write32);
+		memoryWriteStub[3] = GetCursorAddress<DynaCode *>();
+		GenBranchRuntime(addrspace::write64);
+
 		FinalizeCode();
 		codeBuffer.advance(GetBuffer()->GetSizeInBytes());
 
@@ -1635,10 +1764,11 @@ public:
 			GetBuffer()->GetStartAddress<void*>(), GetBuffer()->GetEndAddress<void*>());
 	}
 
-	void GenWriteStoreQueue(u32 size)
+	void GenWriteStoreQueue(u32 size, bool zeroValue = false)
 	{
 		Instruction *start_instruction = GetCursorAddress<Instruction *>();
 
+		if (zeroValue) Mov(w1, wzr);
 		if (size == 4)
 			GenCall(writeStoreQueue32);
 		else
@@ -1751,11 +1881,22 @@ private:
 		if (GenReadMemoryImmediate(op))
 			return;
 
-		GenMemAddr(op, &w0);
-		genMmuLookup(op, 0);
-
-		if (!optimise || !GenReadMemoryFast(op, opid))
-			GenReadMemorySlow(op.size);
+		if (optimise && addrspace::virtmemEnabled() && !mmu_enabled())
+		{
+			// Preserve an allocated address register until the rewrite prefix.
+			const Register& address = GenMemAddr(op);
+			// This move must survive replacing the entire fast-access slot.
+			if (address.GetCode() != w0.GetCode())
+				Mov(w0, address);
+			GenReadMemoryFast(op, opid, &address);
+		}
+		else
+		{
+			GenMemAddr(op, &w0);
+			genMmuLookup(op, 0);
+			if (!optimise || !GenReadMemoryFast(op, opid))
+				GenReadMemorySlow(op.size);
+		}
 
 		if (op.size < 8)
 			host_reg_to_shil_param(op.rd, w0);
@@ -1892,7 +2033,7 @@ private:
 		return true;
 	}
 
-	bool GenReadMemoryFast(const shil_opcode& op, size_t opid)
+	bool GenReadMemoryFast(const shil_opcode& op, size_t opid, const Register *directAddress = nullptr)
 	{
 		// Direct memory access. Need to handle SIGSEGV and rewrite block as needed. See rewrite()
 		if (!addrspace::virtmemEnabled())
@@ -1902,25 +2043,36 @@ private:
 
 		// WARNING: the rewrite code relies on having 2 ops before the memory access
 		// Update rewrite (and perhaps read_memory_rewrite_size) if adding or removing code
-		Ubfx(x1, x0, 0, 29);
-		Add(x1, x1, sizeof(Sh4Context), LeaveFlags);
+		if (directAddress != nullptr)
+		{
+			// Exactly two instructions precede the faulting access. x0 must
+			// hold the original guest address for slow-handler/SQ rewriting.
+			Ubfx(x1, directAddress->X(), 0, 29);
+			// Guest address preparation is outside this replaceable slot.
+			Nop();
+		}
+		else
+		{
+			Ubfx(x1, x0, 0, 29);
+			Add(x1, x1, sizeof(Sh4Context), LeaveFlags);
+		}
 
 		switch (op.size)
 		{
 		case 1:
-			Ldrsb(w0, MemOperand(x28, x1));
+			Ldrsb(w0, MemOperand(directAddress != nullptr ? x27 : x28, x1));
 			break;
 
 		case 2:
-			Ldrsh(w0, MemOperand(x28, x1));
+			Ldrsh(w0, MemOperand(directAddress != nullptr ? x27 : x28, x1));
 			break;
 
 		case 4:
-			Ldr(w0, MemOperand(x28, x1));
+			Ldr(w0, MemOperand(directAddress != nullptr ? x27 : x28, x1));
 			break;
 
 		case 8:
-			Ldr(x0, MemOperand(x28, x1));
+			Ldr(x0, MemOperand(directAddress != nullptr ? x27 : x28, x1));
 			break;
 		}
 		EnsureCodeSize(start_instruction, read_memory_rewrite_size);
@@ -1933,14 +2085,23 @@ private:
 		if (GenWriteMemoryImmediate(op))
 			return;
 
-		GenMemAddr(op, &w0);
+		const Register *directAddress = nullptr;
+		if (optimise && addrspace::virtmemEnabled() && !mmu_enabled())
+		{
+			directAddress = &GenMemAddr(op);
+			if (directAddress->GetCode() != w0.GetCode())
+				Mov(w0, *directAddress);
+		}
+		else
+			GenMemAddr(op, &w0);
 		genMmuLookup(op, 1);
 
-		if (op.size != 8)
-			shil_param_to_host_reg(op.rs2, w1);
-		else
-			shil_param_to_host_reg(op.rs2, x1);
-		if (optimise && GenWriteMemoryFast(op, opid))
+        const bool zeroValue = directAddress != nullptr && op.rs2.is_imm() && op.rs2._imm == 0;
+        if (!zeroValue) {
+            if (op.size != 8) shil_param_to_host_reg(op.rs2, w1);
+            else shil_param_to_host_reg(op.rs2, x1);
+        }
+		if (optimise && GenWriteMemoryFast(op, opid, directAddress, zeroValue))
 			return;
 
 		GenWriteMemorySlow(op.size);
@@ -2034,7 +2195,7 @@ private:
 		return true;
 	}
 
-	bool GenWriteMemoryFast(const shil_opcode& op, size_t opid)
+	bool GenWriteMemoryFast(const shil_opcode& op, size_t opid, const Register *directAddress = nullptr, bool zeroValue = false)
 	{
 		// Direct memory access. Need to handle SIGSEGV and rewrite block as needed. See rewrite()
 		if (!addrspace::virtmemEnabled())
@@ -2044,25 +2205,36 @@ private:
 
 		// WARNING: the rewrite code relies on having 2 ops before the memory access
 		// Update rewrite (and perhaps write_memory_rewrite_size) if adding or removing code
-		Ubfx(x7, x0, 0, 29);
-		Add(x7, x7, sizeof(Sh4Context), LeaveFlags);
+		if (directAddress != nullptr)
+		{
+			// Exactly two instructions precede the faulting access. x0 must
+			// hold the original guest address for slow-handler/SQ rewriting.
+			Ubfx(x7, directAddress->X(), 0, 29);
+			// Guest address preparation is outside this replaceable slot.
+			Nop();
+		}
+		else
+		{
+			Ubfx(x7, x0, 0, 29);
+			Add(x7, x7, sizeof(Sh4Context), LeaveFlags);
+		}
 
 		switch(op.size)
 		{
 		case 1:
-			Strb(w1, MemOperand(x28, x7));
+			Strb(zeroValue ? wzr : w1, MemOperand(directAddress != nullptr ? x27 : x28, x7));
 			break;
 
 		case 2:
-			Strh(w1, MemOperand(x28, x7));
+			Strh(zeroValue ? wzr : w1, MemOperand(directAddress != nullptr ? x27 : x28, x7));
 			break;
 
 		case 4:
-			Str(w1, MemOperand(x28, x7));
+			Str(zeroValue ? wzr : w1, MemOperand(directAddress != nullptr ? x27 : x28, x7));
 			break;
 
 		case 8:
-			Str(x1, MemOperand(x28, x7));
+			Str(zeroValue ? xzr : x1, MemOperand(directAddress != nullptr ? x27 : x28, x7));
 			break;
 		}
 		EnsureCodeSize(start_instruction, write_memory_rewrite_size);
@@ -2229,8 +2401,8 @@ private:
 	std::vector<const VRegister*> call_fregs;
 	Arm64RegAlloc regalloc;
 	RuntimeBlockInfo* block = NULL;
-	const int read_memory_rewrite_size = 5;	// ubfx, add, ldr for fast access. calling a handler can use more than 3 depending on offset
-	const int write_memory_rewrite_size = 5; // ubfx, add, str
+	const int read_memory_rewrite_size = 3;	// two address instructions and access; slow handlers use nearby stubs
+	const int write_memory_rewrite_size = 3; // ubfx, add, str
 	Sh4Context& sh4ctx;
 	Sh4CodeBuffer& codeBuffer;
 };
@@ -2397,15 +2569,18 @@ public:
 		}
 		verify(found);
 
-		// Skip the preceding ops (add, ubfx)
+		// Skip the two-instruction address prefix (MMU: ubfx/add;
+		// direct base: ubfx/nop). Guest-address preparation stays outside
+		// this slot so repeated slow accesses still receive the right x0.
 		u32 *code_rewrite = code_ptr - 2;
 		Arm64Assembler *assembler = new Arm64Assembler(*sh4ctx, *codeBuffer, code_rewrite);
+		const bool zeroValue = !is_read && (armv8_op & 31) == 31;
 		if (is_read)
 			assembler->GenReadMemorySlow(size);
 		else if (!is_read && size >= 4 && (context.x0 >> 26) == 0x38)
-			assembler->GenWriteStoreQueue(size);
+			assembler->GenWriteStoreQueue(size, zeroValue);
 		else
-			assembler->GenWriteMemorySlow(size);
+			assembler->GenWriteMemorySlow(size, zeroValue);
 		assembler->Finalize(true);
 		delete assembler;
 		context.pc = (uintptr_t)CC_RW2RX(code_rewrite);
@@ -2449,6 +2624,15 @@ void Arm64RegAlloc::Writeback(u32 reg, eReg nreg)
 {
 	assembler->Str(Register(nreg, 32), assembler->sh4_context_mem_operand((Sh4RegType)reg));
 }
+bool Arm64RegAlloc::WritebackPair(u32 reg1, eReg host1, u32 reg2, eReg host2)
+{
+    u32 first = getRegOffset((Sh4RegType)reg1);
+    u32 second = getRegOffset((Sh4RegType)reg2);
+    if (second != first + 4 || first > 252 || (first & 3) != 0) return false;
+    assembler->Stp(Register(host1, 32), Register(host2, 32), MemOperand(x28, first));
+    return true;
+}
+
 void Arm64RegAlloc::Preload_FPU(u32 reg, eFReg nreg)
 {
 	assembler->Ldr(VRegister(nreg, 32), assembler->sh4_context_mem_operand((Sh4RegType)reg));

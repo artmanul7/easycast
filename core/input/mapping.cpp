@@ -69,6 +69,8 @@ button_list[] =
 	{ EMU_BTN_SAVESTATE_RAM, "emulator", "btn_quick_save_ram" },
 	{ EMU_BTN_BYPASS_KB, "emulator", "btn_bypass_kb" },
 	{ EMU_BTN_SCREENSHOT, "emulator", "btn_screenshot" },
+	{ EMU_BTN_BRIGHT_UP, "emulator", "btn_bright_up" },		// EasyCast 0.2.8
+	{ EMU_BTN_BRIGHT_DOWN, "emulator", "btn_bright_down" },
 };
 
 static struct

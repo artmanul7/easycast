@@ -1440,6 +1440,30 @@ static std::string getFPSNotification()
 
 void gui_draw_osd()
 {
+	// EasyCast diagnostic: this is Flycast's presentation counter, not emulated
+	// speed.  A long interval means gameplay or rendering may have stalled.
+	static u64 easycastTime = 0;
+	static int easycastFrames = 0;
+	if (emu.running() && !settings.content.gameId.empty())
+	{
+		const u64 now = getTimeMs();
+		if (easycastTime != 0 && now - easycastTime >= 5000)
+		{
+			fprintf(stderr, "EASYCAST_SAMPLE interval_ms=%llu frames=%d game_id=%s path=%s\n",
+					(unsigned long long)(now - easycastTime), MainFrameCount - easycastFrames,
+					settings.content.gameId.c_str(), settings.content.path.c_str());
+			fflush(stderr);
+			easycastTime = now;
+			easycastFrames = MainFrameCount;
+		}
+		else if (easycastTime == 0)
+		{
+			easycastTime = now;
+			easycastFrames = MainFrameCount;
+		}
+	}
+	else
+		easycastTime = 0;
 	gui_newFrame();
 	ImGui::NewFrame();
 
@@ -1571,6 +1595,8 @@ void reset_vmus() {
 }
 
 void gui_error(const std::string& what) {
+	fprintf(stderr, "EASYCAST_UI_ERROR %s\n", what.c_str());
+	fflush(stderr);
 	error_msg = what;
 }
 

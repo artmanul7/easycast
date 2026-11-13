@@ -19,6 +19,7 @@
     along with Flycast.  If not, see <https://www.gnu.org/licenses/>.
 */
 #include "pipeline.h"
+#include "easycast_diag.h"
 #include "hw/pvr/Renderer_if.h"
 
 void PipelineManager::CreateModVolPipeline(ModVolMode mode, int cullMode, bool naomi2)
@@ -153,7 +154,7 @@ void PipelineManager::CreateModVolPipeline(ModVolMode mode, int cullMode, bool n
 	);
 
 	modVolPipelines[hash(mode, cullMode, naomi2)] =
-			GetContext()->GetDevice().createGraphicsPipelineUnique(GetContext()->GetPipelineCache(),
+			easycast_diag::timedPipeline(GetContext()->GetDevice(), GetContext()->GetPipelineCache(),
 					graphicsPipelineCreateInfo).value;
 }
 
@@ -266,7 +267,7 @@ void PipelineManager::CreateDepthPassPipeline(int cullMode, bool naomi2)
 	);
 
 	depthPassPipelines[hash(cullMode, naomi2)] =
-			GetContext()->GetDevice().createGraphicsPipelineUnique(GetContext()->GetPipelineCache(),
+			easycast_diag::timedPipeline(GetContext()->GetDevice(), GetContext()->GetPipelineCache(),
 					graphicsPipelineCreateInfo).value;
 }
 
@@ -432,6 +433,6 @@ void PipelineManager::CreatePipeline(u32 listType, bool sortTriangles, const Pol
 	  renderPass                                  // renderPass
 	);
 
-	pipelines[hash(listType, sortTriangles, &pp, gpuPalette, dithering)] = GetContext()->GetDevice().createGraphicsPipelineUnique(GetContext()->GetPipelineCache(),
+	pipelines[hash(listType, sortTriangles, &pp, gpuPalette, dithering)] = easycast_diag::timedPipeline(GetContext()->GetDevice(), GetContext()->GetPipelineCache(),
 			graphicsPipelineCreateInfo).value;
 }

@@ -1215,6 +1215,8 @@ void gui_settings_controls(std::array<bool, 4>& mapleDevicesChanges, std::array<
 			ImGui::EndTable();
 		}
 		OptionCheckbox(T("Per Game VMU A1"), config::PerGameVmu, T("When enabled, each game has its own VMU on port 1 of controller A."));
+		OptionCheckbox(T("Swap D-Pad and analog stick"), config::StickDpadSwap,
+				T("The analog stick works as the D-Pad and the D-Pad as the analog stick (full tilt). Use per-game settings to enable it for one game."));
 		{
 			DisabledScope scope(game_started);
 			OptionCheckbox(T("Use Physical VMU Storage"), config::UsePhysicalVmuMemory,

@@ -30,7 +30,7 @@
 
 #define ssa_printf(...) DEBUG_LOG(DYNAREC, __VA_ARGS__)
 
-template<typename nreg_t, typename nregf_t, bool AllocVec2 = false>
+template<typename nreg_t, typename nregf_t, bool AllocVec2 = false, bool DeferSafeIntWrites = false>
 class RegAlloc
 {
 public:
@@ -55,6 +55,10 @@ public:
 	void OpBegin(shil_opcode* op, int opid)
 	{
 		opnum = opid;
+        // ARM64 only: before any potentially observing/throwing operation,
+        // materialise all pending architectural state.
+        if constexpr (DeferSafeIntWrites)
+            if (!IsSafeIntegerOp(op)) FlushAllRegs(false);
 		if (op->op == shop_ifb)
 		{
 			FlushAllRegs(true);
@@ -134,8 +138,10 @@ public:
 		pending_flushes.clear();
 
 		// Flush normally
-		for (auto const& reg : reg_alloced)
-			FlushReg(reg.first, false);
+        for (auto const& reg : reg_alloced) {
+            if constexpr (!DeferSafeIntWrites) FlushReg(reg.first, false);
+            else if (IsFloat(reg.first)) FlushReg(reg.first, false);
+        }
 
 		// Hard flush all dirty regs. Useful for troubleshooting
 //		while (!reg_alloced.empty())
@@ -257,11 +263,24 @@ public:
 
 	virtual void Preload(u32 reg, nreg_t nreg) = 0;
 	virtual void Writeback(u32 reg, nreg_t nreg) = 0;
+    virtual bool WritebackPair(u32, nreg_t, u32, nreg_t) { return false; }
 
 	virtual void Preload_FPU(u32 reg, nregf_t nreg) = 0;
 	virtual void Writeback_FPU(u32 reg, nregf_t nreg) = 0;
 
 private:
+    static bool IsSafeIntegerOp(const shil_opcode* op) {
+        if (!op->rd.is_r32i() || !op->rd2.is_null() || !op->rs3.is_null()) return false;
+        if (!(op->rs1.is_r32i() || op->rs1.is_imm())) return false;
+        if (!(op->rs2.is_null() || op->rs2.is_r32i() || op->rs2.is_imm())) return false;
+        switch (op->op) {
+        case shop_mov32: case shop_add: case shop_sub:
+        case shop_and: case shop_or: case shop_xor:
+        case shop_neg: case shop_not: case shop_shl: case shop_shr: case shop_sar:
+            return true;
+        default: return false;
+        }
+    }
 	struct reg_alloc {
 		u32 host_reg;
 		u16 version;
@@ -355,8 +374,23 @@ private:
 		}
 		else
 		{
-			for (auto const& reg : reg_alloced)
-				FlushReg(reg.first, false);
+            for (auto it = reg_alloced.begin(); it != reg_alloced.end();) {
+                if constexpr (DeferSafeIntWrites) {
+                    auto next = std::next(it);
+                    if (!IsFloat(it->first) && it->second.write_back
+                        && next != reg_alloced.end() && !IsFloat(next->first)
+                        && next->second.write_back
+                        && (fast_forwarding || WritebackPair(it->first, (nreg_t)it->second.host_reg,
+                                                            next->first, (nreg_t)next->second.host_reg))) {
+                        it->second.write_back = it->second.dirty = false;
+                        next->second.write_back = next->second.dirty = false;
+                        it = ++next;
+                        continue;
+                    }
+                }
+                FlushReg(it->first, false);
+                ++it;
+            }
 		}
 	}
 

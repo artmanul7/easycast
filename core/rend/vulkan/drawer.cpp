@@ -19,6 +19,9 @@
     along with Flycast.  If not, see <https://www.gnu.org/licenses/>.
 */
 #include "drawer.h"
+#include "gpu_timer.h"
+
+static vk::Pipeline easycastLastPipeline;	// EasyCast: bound last in this draw list
 #include "hw/pvr/pvr_mem.h"
 #include "rend/sorter.h"
 
@@ -161,7 +164,11 @@ void Drawer::DrawPoly(const vk::CommandBuffer& cmdBuffer, u32 listType, bool sor
 	}
 
 	vk::Pipeline pipeline = pipelineManager->GetPipeline(listType, sortTriangles, poly, gpuPalette, dithering);
-	cmdBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
+	if (pipeline != easycastLastPipeline)
+	{
+		cmdBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
+		easycastLastPipeline = pipeline;
+	}
 	if (poly.pcw.Texture || poly.isNaomi2())
 	{
 		vk::DeviceSize offset = 0;
@@ -197,6 +204,8 @@ void Drawer::DrawSorted(const vk::CommandBuffer& cmdBuffer, const std::vector<So
 
 	static const float scopeColor[4] = { 0.25f, 0.50f, 0.50f, 1.0f };
 	CommandBufferDebugScope _(cmdBuffer, "DrawSorted", scopeColor);
+	easycastLastPipeline = vk::Pipeline();
+	descriptorSets.easycastResetBound();
 
 	for (u32 idx = first; idx < last; idx++)
 		DrawPoly(cmdBuffer, ListType_Translucent, true, rendContext->global_param_tr[polys[idx].polyIndex], polys[idx].first, polys[idx].count);
@@ -225,6 +234,8 @@ void Drawer::DrawList(const vk::CommandBuffer& cmdBuffer, u32 listType, bool sor
 
 	static const float scopeColor[4] = { 0.50f, 0.25f, 0.50f, 1.0f };
 	CommandBufferDebugScope _(cmdBuffer, "DrawList", scopeColor);
+	easycastLastPipeline = vk::Pipeline();
+	descriptorSets.easycastResetBound();
 
 	const PolyParam *pp_end = polys.data() + last;
 	for (const PolyParam *pp = &polys[first]; pp != pp_end; pp++)
@@ -294,7 +305,7 @@ void Drawer::DrawModVols(const vk::CommandBuffer& cmdBuffer, int first, int coun
 
 void Drawer::UploadMainBuffer(const VertexShaderUniforms& vertexUniforms, const FragmentShaderUniforms& fragmentUniforms)
 {
-	BufferPacker packer;
+	BufferPacker& packer = resetUploadPacker();
 
 	// Vertex
 	packer.add(rendContext->verts.data(), rendContext->verts.size() * sizeof(decltype(*rendContext->verts.data())));
@@ -306,7 +317,8 @@ void Drawer::UploadMainBuffer(const VertexShaderUniforms& vertexUniforms, const 
 	offsets.vertexUniformOffset = packer.addUniform(&vertexUniforms, sizeof(vertexUniforms));
 	offsets.fragmentUniformOffset = packer.addUniform(&fragmentUniforms, sizeof(fragmentUniforms));
 
-	std::vector<u8> n2uniforms;
+	std::vector<u8>& n2uniforms = uploadNaomiUniforms;
+	n2uniforms.clear();
 	if (settings.platform.isNaomi2())
 	{
 		packNaomi2Uniforms(packer, offsets, n2uniforms, false);
@@ -690,6 +702,7 @@ vk::CommandBuffer ScreenDrawer::BeginRenderPass()
 		frameRendered = false;
 		vk::CommandBuffer commandBuffer = commandPool->Allocate(true);
 		commandBuffer.begin(vk::CommandBufferBeginInfo(vk::CommandBufferUsageFlagBits::eOneTimeSubmit));
+		easycast_gpu::begin(commandBuffer, GetContext()->GetDevice(), GetContext()->GetPhysicalDevice(), GetContext()->GetGraphicsQueueFamilyIndex());
 
 		if (transitionNeeded[GetCurrentImage()])
 		{
@@ -728,6 +741,7 @@ void ScreenDrawer::EndRenderPass()
 	}
 	else
 	{
+		easycast_gpu::end(currentCommandBuffer);
 		currentCommandBuffer.end();
 		commandPool->EndFrame();
 		aspectRatio = getOutputFramebufferAspectRatio();

@@ -49,6 +49,9 @@ VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 #include <algorithm>
 #include <cstring>
 
+#include "drm_presenter.h"
+namespace config { extern Option<int> EasycastScreen; }
+
 void ReInitOSD();
 
 #ifdef VK_DEBUG
@@ -400,7 +403,7 @@ bool VulkanContext::InitDevice()
 
 		// determine a queueFamilyIndex that supports present
 		// first check if the graphicsQueueFamilyIndex is good enough
-		presentQueueIndex = physicalDevice.getSurfaceSupportKHR(graphicsQueueIndex, GetSurface()) ? graphicsQueueIndex : queueFamilyProperties.size();
+		presentQueueIndex = (easycastDrm || physicalDevice.getSurfaceSupportKHR(graphicsQueueIndex, GetSurface())) ? graphicsQueueIndex : queueFamilyProperties.size();
 		if (presentQueueIndex == queueFamilyProperties.size())
 		{
 			// the graphicsQueueFamilyIndex doesn't support present -> look for an other family index that supports both graphics and present
@@ -462,6 +465,16 @@ bool VulkanContext::InitDevice()
 
 		// Required swapchain extension
 		tryAddDeviceExtension(vk::KHRSwapchainExtensionName);
+        if (easycastDrm) {
+            for (const char *name : {"VK_KHR_external_memory_fd", "VK_EXT_external_memory_dma_buf", "VK_EXT_image_drm_format_modifier"})
+                if (!tryAddDeviceExtension(name)) {
+                    ERROR_LOG(RENDERER, "EASYCAST_DRM required Vulkan extension missing: %s", name);
+                    throw FlycastException("Required DRM/Vulkan extension missing");
+                }
+            easycastDrm->foreignQueue = tryAddDeviceExtension("VK_EXT_queue_family_foreign");
+            if (!easycastDrm->foreignQueue)
+                NOTICE_LOG(RENDERER, "EASYCAST_DRM no VK_EXT_queue_family_foreign: using VK_QUEUE_FAMILY_EXTERNAL");
+        }
 
 #ifdef VK_ENABLE_BETA_EXTENSIONS
 		tryAddDeviceExtension(vk::KHRPortabilitySubsetExtensionName);
@@ -672,6 +685,10 @@ bool VulkanContext::InitDevice()
 	catch (const InvalidVulkanContext&)
 	{
 	}
+	catch (const std::exception& e)
+	{
+		ERROR_LOG(RENDERER, "EASYCAST_VKERR %s", e.what());
+	}
 	catch (...)
 	{
 		ERROR_LOG(RENDERER, "Unknown error");
@@ -683,6 +700,7 @@ void VulkanContext::CreateSwapChain()
 {
 	try
 	{
+		easycastAsync.stop();
 		device->waitIdle();
 
 		if (!drawFences.empty())
@@ -705,7 +723,15 @@ void VulkanContext::CreateSwapChain()
 		rendering = false;
 		renderDone = false;
 
-		// Determine surface format and color-space
+		std::vector<vk::Image> swapChainImages;
+        if (easycastDrm) {
+            presentFormat = vk::Format::eR8G8B8A8Unorm;
+            swapChainImages = easycastDrm->create(*device, 3);
+            SetWindowSize(easycastDrm->width(), easycastDrm->height());
+            resized = false;
+            swapInterval = 1;
+        } else {
+        // Determine surface format and color-space
 		std::vector<vk::SurfaceFormatKHR> surfaceFormats = physicalDevice.getSurfaceFormatsKHR(GetSurface());
 
 		// Prefer a non-sRGB image format
@@ -832,7 +858,8 @@ void VulkanContext::CreateSwapChain()
 
 		swappyvk::init(physicalDevice, *device, *swapChain);
 
-		std::vector<vk::Image> swapChainImages = device->getSwapchainImagesKHR(*swapChain);
+		swapChainImages = device->getSwapchainImagesKHR(*swapChain);
+        }
 
 		imageViews.resize(swapChainImages.size());
 		commandPools.reserve(swapChainImages.size());
@@ -861,7 +888,7 @@ void VulkanContext::CreateSwapChain()
 	    // Render pass
 	    vk::AttachmentDescription attachmentDescription = vk::AttachmentDescription(vk::AttachmentDescriptionFlags(), presentFormat, vk::SampleCountFlagBits::e1,
 	    		vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore, vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
-				vk::ImageLayout::eUndefined, vk::ImageLayout::ePresentSrcKHR);
+				easycastDrm ? vk::ImageLayout::eColorAttachmentOptimal : vk::ImageLayout::eUndefined, easycastDrm ? vk::ImageLayout::eGeneral : vk::ImageLayout::ePresentSrcKHR);
 
 	    vk::AttachmentReference colorReference(0, vk::ImageLayout::eColorAttachmentOptimal);
 	    vk::SubpassDescription subpass(vk::SubpassDescriptionFlags(), vk::PipelineBindPoint::eGraphics, nullptr, colorReference,
@@ -918,6 +945,11 @@ bool VulkanContext::init()
 #if defined(USE_SDL)
 	if (!sdl_recreate_window(SDL_WINDOW_VULKAN))
 		return false;
+    const char *directDrm = getenv("EASYCAST_DRM_PRESENT");
+    if (directDrm && !strcmp(directDrm, "1")) {
+        const char *screen = getenv("EASYCAST_SCREEN");
+        easycastDrm = std::make_unique<EasycastDrmPresenter>(screen ? screen : (config::EasycastScreen == 1 ? "bottom" : "top"));
+    }
     uint32_t extensionsCount = 0;
     SDL_Vulkan_GetInstanceExtensions((SDL_Window *)window, &extensionsCount, NULL);
     extensions.resize(extensionsCount + extensions.size());
@@ -939,12 +971,14 @@ bool VulkanContext::init()
 	}
 
 #if defined(USE_SDL)
+    if (!easycastDrm) {
     VkSurfaceKHR surface;
     if (SDL_Vulkan_CreateSurface((SDL_Window *)window, (VkInstance)*instance, &surface) == 0) {
 		term();
     	return false;
     }
     this->surface.reset(vk::SurfaceKHR(surface));
+    }
 	SDL_Window *sdlWin = (SDL_Window *)window;
 	sdl_update_display_metrics(sdlWin, SDL_WINDOW_VULKAN);
 #elif defined(VK_USE_PLATFORM_WIN32_KHR)
@@ -989,7 +1023,10 @@ void VulkanContext::NewFrame()
 	recreateSwapChainIfNeeded();
 	if (!IsValid())
 		throw InvalidVulkanContext();
-	vk::Result res = device->acquireNextImageKHR(*swapChain, UINT64_MAX, *imageAcquiredSemaphores[currentSemaphore], nullptr, &currentImage);
+	vk::Result res = vk::Result::eSuccess;
+    if (easycastDrm) currentImage = (currentImage + 1) % GetSwapChainSize();
+    else res = device->acquireNextImageKHR(*swapChain, UINT64_MAX, *imageAcquiredSemaphores[currentSemaphore], nullptr, &currentImage);
+    if (easycastDrm && EasycastAsyncPresent::enabled()) easycastAsync.waitFree(currentImage);
 	if (res != vk::Result::eSuccess)
 		throw InvalidVulkanContext();
 	try {
@@ -1004,6 +1041,7 @@ void VulkanContext::NewFrame()
 	inFlightObjects[currentImage].clear();
 	vk::CommandBuffer commandBuffer = *commandBuffers[currentImage];
 	commandBuffer.begin(vk::CommandBufferBeginInfo(vk::CommandBufferUsageFlagBits::eOneTimeSubmit));
+    if (easycastDrm) easycastDrm->barrier(commandBuffer, currentImage, graphicsQueueIndex, true);
 	assert(!rendering);
 	rendering = true;
 }
@@ -1024,6 +1062,7 @@ void VulkanContext::EndFrame(vk::CommandBuffer overlayCmdBuffer)
 		return;
 	vk::CommandBuffer commandBuffer = *commandBuffers[currentImage];
 	commandBuffer.endRenderPass();
+    if (easycastDrm) easycastDrm->barrier(commandBuffer, currentImage, graphicsQueueIndex, false);
 	commandBuffer.end();
 	vk::PipelineStageFlags wait_stage(vk::PipelineStageFlagBits::eColorAttachmentOutput);
 	std::vector<vk::CommandBuffer> allCmdBuffers;
@@ -1032,7 +1071,11 @@ void VulkanContext::EndFrame(vk::CommandBuffer overlayCmdBuffer)
 	allCmdBuffers.push_back(commandBuffer);
 	vk::SubmitInfo submitInfo(*imageAcquiredSemaphores[currentSemaphore], wait_stage, allCmdBuffers, *renderCompleteSemaphores[currentSemaphore]);
 	device->resetFences(*drawFences[currentImage]);
-	graphicsQueue.submit(submitInfo, *drawFences[currentImage]);
+	if (easycastDrm) {
+        vk::SubmitInfo direct;
+        direct.setCommandBuffers(allCmdBuffers);
+        graphicsQueue.submit(direct, *drawFences[currentImage]);
+    } else graphicsQueue.submit(submitInfo, *drawFences[currentImage]);
 	assert(rendering);
 	rendering = false;
 	renderDone = true;
@@ -1040,6 +1083,25 @@ void VulkanContext::EndFrame(vk::CommandBuffer overlayCmdBuffer)
 
 void VulkanContext::Present() noexcept
 {
+    if (easycastDrm) {
+        if (renderDone) {
+            try {
+                if (EasycastAsyncPresent::enabled()) {
+                    if (easycastAsync.takeError()) throw FlycastException("async DRM present failed");
+                    easycastAsync.submit(*device, currentImage, *drawFences[currentImage]);
+                } else {
+                vk::Result result = device->waitForFences(*drawFences[currentImage], true, 2000000000ULL);
+                if (result != vk::Result::eSuccess) throw FlycastException("DRM render fence timeout");
+                easycastDrm->present(currentImage);
+                }
+            } catch (const std::exception& e) {
+                ERROR_LOG(RENDERER, "EasyCast DRM present: %s", e.what());
+                resized = true;
+            }
+            renderDone = false;
+        }
+        return;
+    }
 	if (renderDone)
 	{
 		try {
@@ -1216,6 +1278,7 @@ void VulkanContext::PresentLastFrame()
 
 void VulkanContext::term()
 {
+	easycastAsync.stop();
 	lastFrameView = nullptr;
 	if (device && graphicsQueue)
 		WaitIdle();
@@ -1264,6 +1327,7 @@ void VulkanContext::term()
 	renderCompleteSemaphores.clear();
 	drawFences.clear();
 	allocator.Term();
+    easycastDrm.reset();
 #ifndef USE_SDL
 	surface.reset();
 #else
@@ -1408,6 +1472,7 @@ void VulkanContext::DoSwapAutomation()
 
 bool VulkanContext::HasSurfaceDimensionChanged() const
 {
+    if (easycastDrm) return false;
 	vk::SurfaceCapabilitiesKHR surfaceCapabilities =
 			physicalDevice.getSurfaceCapabilitiesKHR(GetSurface());
 	vk::Extent2D swapchainExtent;

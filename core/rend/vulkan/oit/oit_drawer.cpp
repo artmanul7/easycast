@@ -19,6 +19,15 @@
     along with Flycast.  If not, see <https://www.gnu.org/licenses/>.
 */
 #include "oit_drawer.h"
+#include "easycast_oit.h"
+#include <cstring>
+
+// EasyCast: state bound last in this draw list (skip identical re-binds; reset in DrawList)
+static vk::Pipeline easycastLastPipeline;
+static OITDescriptorSets::PushConstants easycastLastPush;
+static bool easycastPushValid = false;
+static int easycastLastPolyNumber = -1;
+#include "../gpu_timer.h"
 #include "hw/pvr/pvr_mem.h"
 #include "rend/sorter.h"
 
@@ -83,7 +92,12 @@ void OITDrawer::DrawPoly(const vk::CommandBuffer& cmdBuffer, u32 listType, bool 
 		pushConstants.ignore_tex_alpha0 = poly.tsp.IgnoreTexA;
 		pushConstants.ignore_tex_alpha1 = poly.tsp1.IgnoreTexA;
 	}
-	cmdBuffer.pushConstants<OITDescriptorSets::PushConstants>(pipelineManager->GetPipelineLayout(), vk::ShaderStageFlagBits::eFragment, 0, pushConstants);
+	if (!easycastPushValid || std::memcmp(&pushConstants, &easycastLastPush, sizeof(pushConstants)) != 0)
+	{
+		cmdBuffer.pushConstants<OITDescriptorSets::PushConstants>(pipelineManager->GetPipelineLayout(), vk::ShaderStageFlagBits::eFragment, 0, pushConstants);
+		easycastLastPush = pushConstants;
+		easycastPushValid = true;
+	}
 	if (!poly.isNaomi2())
 	{
 		OITDescriptorSets::VtxPushConstants vtxPushConstants {};
@@ -91,8 +105,12 @@ void OITDrawer::DrawPoly(const vk::CommandBuffer& cmdBuffer, u32 listType, bool 
 			u32 firstVertexIdx = rendContext->idx[rendContext->global_param_tr[0].first];
 			vtxPushConstants.polyNumber = (int)((&poly - &rendContext->global_param_tr[0]) << 17) - firstVertexIdx;
 		};
-		cmdBuffer.pushConstants<OITDescriptorSets::VtxPushConstants>(pipelineManager->GetPipelineLayout(), vk::ShaderStageFlagBits::eVertex,
-				sizeof(OITDescriptorSets::PushConstants), vtxPushConstants);
+		if (vtxPushConstants.polyNumber != easycastLastPolyNumber)
+		{
+			cmdBuffer.pushConstants<OITDescriptorSets::VtxPushConstants>(pipelineManager->GetPipelineLayout(), vk::ShaderStageFlagBits::eVertex,
+					sizeof(OITDescriptorSets::PushConstants), vtxPushConstants);
+			easycastLastPolyNumber = vtxPushConstants.polyNumber;
+		}
 	}
 
 	if (poly.pcw.Texture == 1 || poly.isNaomi2())
@@ -122,7 +140,11 @@ void OITDrawer::DrawPoly(const vk::CommandBuffer& cmdBuffer, u32 listType, bool 
 	}
 
 	vk::Pipeline pipeline = pipelineManager->GetPipeline(listType, autosort, poly, pass, gpuPalette);
-	cmdBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
+	if (pipeline != easycastLastPipeline)
+	{
+		cmdBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
+		easycastLastPipeline = pipeline;
+	}
 
 	cmdBuffer.drawIndexed(count, 1, first, 0, 0);
 }
@@ -135,6 +157,10 @@ void OITDrawer::DrawList(const vk::CommandBuffer& cmdBuffer, u32 listType, bool 
 
 	static const float scopeColor[4] = { 0.50f, 0.25f, 0.50f, 1.0f };
 	CommandBufferDebugScope _(cmdBuffer, "DrawList(OIT)", scopeColor);
+	easycastLastPipeline = vk::Pipeline();
+	easycastPushValid = false;
+	easycastLastPolyNumber = -1;
+	descriptorSets.easycastResetBound();
 
 	const PolyParam *pp_end = polys.data() + last;
 	for (const PolyParam *pp = &polys[first]; pp != pp_end; pp++)
@@ -226,7 +252,7 @@ void OITDrawer::DrawModifierVolumes(const vk::CommandBuffer& cmdBuffer, int firs
 void OITDrawer::UploadMainBuffer(const OITDescriptorSets::VertexShaderUniforms& vertexUniforms,
 		const OITDescriptorSets::FragmentShaderUniforms& fragmentUniforms)
 {
-	BufferPacker packer;
+	BufferPacker& packer = resetUploadPacker();
 
 	// Vertex
 	packer.add(rendContext->verts.data(), rendContext->verts.size() * sizeof(decltype(*rendContext->verts.data())));
@@ -255,7 +281,8 @@ void OITDrawer::UploadMainBuffer(const OITDescriptorSets::VertexShaderUniforms& 
 	offsets.polyParamsSize = trPolyParams.size() * 4;
 	offsets.polyParamsOffset = packer.addStorage(trPolyParams.data(), offsets.polyParamsSize);
 
-	std::vector<u8> n2uniforms;
+	std::vector<u8>& n2uniforms = uploadNaomiUniforms;
+	n2uniforms.clear();
 	if (settings.platform.isNaomi2())
 	{
 		packNaomi2Uniforms(packer, offsets, n2uniforms, true);
@@ -404,9 +431,32 @@ bool OITDrawer::Draw(const Texture *fogTexture, const Texture *paletteTexture)
     					targetFramebuffer, viewport, clear_colors),
     			vk::SubpassContents::eInline);
 
+		// EasyCast: the depth pre-pass only matters for opaque modifier volumes (shadows need the final depth)
+		const bool easycastMv = current_pass.mvo_count != previous_pass.mvo_count;
+		const bool easycastSkipPrepass = easycast_oit::z1() && !rendContext->isRTT && initialPass && finalPass && !easycastMv;
+		if (!rendContext->isRTT)
+		{
+			easycast_oit::Scene &sc = easycast_oit::scene();
+			sc.passes++;
+			if (initialPass) sc.frames++;
+			if (easycastMv) sc.mvFrames++;
+			if (easycastSkipPrepass) sc.skipped++;
+			sc.op += current_pass.op_count - previous_pass.op_count;
+			sc.pt += current_pass.pt_count - previous_pass.pt_count;
+			sc.tr += current_pass.tr_count - previous_pass.tr_count;
+		}
 		// Depth + stencil subpass
-		DrawList(cmdBuffer, ListType_Opaque, false, Pass::Depth, rendContext->global_param_op, previous_pass.op_count, current_pass.op_count);
-		DrawList(cmdBuffer, ListType_Punch_Through, false, Pass::Depth, rendContext->global_param_pt, previous_pass.pt_count, current_pass.pt_count);
+		if (!easycastSkipPrepass)
+		{
+			DrawList(cmdBuffer, ListType_Opaque, false, Pass::Depth, rendContext->global_param_op, previous_pass.op_count, current_pass.op_count);
+			DrawList(cmdBuffer, ListType_Punch_Through, false, Pass::Depth, rendContext->global_param_pt, previous_pass.pt_count, current_pass.pt_count);
+		}
+		else
+		{
+			// EasyCast: opaque + punch-through once, colour and depth together (no shadow volume in this frame)
+			DrawList(cmdBuffer, ListType_Opaque, false, Pass::ColorPre, rendContext->global_param_op, previous_pass.op_count, current_pass.op_count);
+			DrawList(cmdBuffer, ListType_Punch_Through, false, Pass::ColorPre, rendContext->global_param_pt, previous_pass.pt_count, current_pass.pt_count);
+		}
 
 		DrawModifierVolumes<false>(cmdBuffer, previous_pass.mvo_count, current_pass.mvo_count - previous_pass.mvo_count, rendContext->global_param_mvo.data());
 
@@ -414,8 +464,11 @@ bool OITDrawer::Draw(const Texture *fogTexture, const Texture *paletteTexture)
 		cmdBuffer.nextSubpass(vk::SubpassContents::eInline);
 
 		// OP + PT
-		DrawList(cmdBuffer, ListType_Opaque, false, Pass::Color, rendContext->global_param_op, previous_pass.op_count, current_pass.op_count);
-		DrawList(cmdBuffer, ListType_Punch_Through, false, Pass::Color, rendContext->global_param_pt, previous_pass.pt_count, current_pass.pt_count);
+		if (!easycastSkipPrepass)
+		{
+			DrawList(cmdBuffer, ListType_Opaque, false, Pass::Color, rendContext->global_param_op, previous_pass.op_count, current_pass.op_count);
+			DrawList(cmdBuffer, ListType_Punch_Through, false, Pass::Color, rendContext->global_param_pt, previous_pass.pt_count, current_pass.pt_count);
+		}
 
 		// TR
 		if (firstFrameAfterInit)
@@ -477,6 +530,7 @@ bool OITDrawer::Draw(const Texture *fogTexture, const Texture *paletteTexture)
 		cmdBuffer.endRenderPass();
 		previous_pass = current_pass;
     }
+    easycast_oit::frameEnd(cmdBuffer, oitBuffers->getPixelCounterBuffer(), !rendContext->isRTT);
     curMainBuffer = nullptr;
 
 	return !rendContext->isRTT;
@@ -715,6 +769,7 @@ vk::CommandBuffer OITScreenDrawer::NewFrame()
 		NewImage();
 		currentCommandBuffer = commandPool->Allocate(true);
 		currentCommandBuffer.begin(vk::CommandBufferBeginInfo(vk::CommandBufferUsageFlagBits::eOneTimeSubmit));
+		easycast_gpu::begin(currentCommandBuffer, GetContext()->GetDevice(), GetContext()->GetPhysicalDevice(), GetContext()->GetGraphicsQueueFamilyIndex());
 	}
 	matrices.CalcMatrices(rendContext, viewport.extent.width, viewport.extent.height);
 

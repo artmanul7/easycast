@@ -65,10 +65,28 @@ public:
 		vmaGetMemoryTypeProperties(allocator, allocInfo.memoryType, &flags);
 		return flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
 	}
+	u32 MemoryFlags() const {	// EasyCast diagnostics
+		VkMemoryPropertyFlags flags;
+		vmaGetMemoryTypeProperties(allocator, allocInfo.memoryType, &flags);
+		return flags;
+	}
+	bool IsPersistent() const { return allocInfo.pMappedData != nullptr; }
+	// flush a written range of cached non-coherent memory (no-op for coherent memory)
+	void Flush(VkDeviceSize offset, VkDeviceSize size) const {
+		const u32 flags = MemoryFlags();
+		if ((flags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) && (flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) == 0)
+			vmaFlushAllocation(allocator, allocation, offset, size);
+	}
 	void *MapMemory() const
 	{
 		if (allocInfo.pMappedData != nullptr)
+		{
+			// EasyCast: persistently mapped - still make GPU writes visible for cached non-coherent memory
+			const u32 flags = MemoryFlags();
+			if ((flags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) && (flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) == 0)
+				vmaInvalidateAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
 			return allocInfo.pMappedData;
+		}
 		void *p;
 		VkResult res = vmaMapMemory(allocator, allocation, &p);
 		vk::detail::resultCheck(static_cast<vk::Result>(res), "vmaMapMemory failed");
@@ -81,7 +99,13 @@ public:
 	void UnmapMemory() const
 	{
 		if (allocInfo.pMappedData != nullptr)
+		{
+			// EasyCast: persistently mapped - flush CPU writes for cached non-coherent memory, keep the mapping
+			const u32 flags = MemoryFlags();
+			if ((flags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) && (flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) == 0)
+				vmaFlushAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
 			return;
+		}
 		VkMemoryPropertyFlags flags;
 		vmaGetMemoryTypeProperties(allocator, allocInfo.memoryType, &flags);
 		if ((flags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) && (flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) == 0)

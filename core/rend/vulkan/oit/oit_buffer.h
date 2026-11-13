@@ -82,6 +82,8 @@ public:
 		}
 	}
 
+	vk::Buffer getPixelCounterBuffer() const { return *pixelCounter->buffer; }	// EasyCast OIT stats
+
 	void ResetPixelCounter(vk::CommandBuffer commandBuffer)
 	{
     	vk::BufferCopy copy(0, 0, sizeof(int));
@@ -135,6 +137,6 @@ private:
 		pixelBufferAddress =
 			(usage & vk::BufferUsageFlagBits::eShaderDeviceAddressKHR)
 			? context->GetDevice().getBufferAddress(vk::BufferDeviceAddressInfo{*pixelBuffer->buffer}) : 0;
-		DEBUG_LOG(RENDERER, "PixelBuffer allocated. size %" PRIu64 " address %" PRIu64 "", allocSize, pixelBufferAddress);
+		NOTICE_LOG(RENDERER, "PixelBuffer allocated. size %" PRIu64 " address %" PRIu64 "", allocSize, pixelBufferAddress);
 	}
 };

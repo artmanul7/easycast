@@ -1,6 +1,7 @@
 #include "glcache.h"
 #include "gles.h"
 #include "hw/pvr/pvr_mem.h"
+#include "easycast_draw_stats.h"
 
 #include <memory>
 
@@ -278,13 +279,18 @@ void ReadRTTBuffer()
 
 BaseTextureCacheData *OpenGLRenderer::GetTexture(TSP tsp, TCW tcw, int area)
 {
+	++easycastDrawStats.textures;
 	//lookup texture
 	TextureCacheData* tf = TexCache.getTextureCacheData(tsp, tcw, area);
 
 	//update if needed
 	if (tf->NeedsUpdate())
 	{
-		if (!tf->Update())
+		++easycastDrawStats.textureUpdates;
+		const auto start = EasycastTiming::Clock::now();
+		const bool updated = tf->Update();
+		easycastDrawStats.textureUpdateUs += std::chrono::duration_cast<std::chrono::microseconds>(EasycastTiming::Clock::now() - start).count();
+		if (!updated)
 			tf = nullptr;
 	}
 	else if (tf->IsCustomTextureAvailable())

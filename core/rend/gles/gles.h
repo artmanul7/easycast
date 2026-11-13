@@ -48,6 +48,7 @@ void DrawStrips();
 struct PipelineShader
 {
 	GLuint program;
+	u64 uniformGeneration = 0;
 
 	GLint depth_scale;
 	GLint pp_ClipTest;
@@ -385,6 +386,7 @@ void glReadFramebuffer(const FramebufferInfo& info);
 GLuint init_output_framebuffer(int width, int height);
 void writeFramebufferToVRAM();
 
+extern u64 glesUniformGeneration;
 PipelineShader *GetProgram(bool cp_AlphaTest, bool pp_InsideClipping,
 		bool pp_Texture, bool pp_UseAlpha, bool pp_IgnoreTexA, u32 pp_ShadInstr, bool pp_Offset,
 		u32 pp_FogCtrl, bool pp_Gouraud, bool pp_BumpMap, bool fog_clamping, bool trilinear,

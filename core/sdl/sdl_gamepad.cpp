@@ -29,9 +29,9 @@ public:
 	DefaultInputMapping()
 	{
 		name = "Default";
-		set_button(DC_BTN_Y, 0);
+		set_button(DC_BTN_A, 0);
 		set_button(DC_BTN_B, 1);
-		set_button(DC_BTN_A, 2);
+		set_button(DC_BTN_Y, 2);
 		set_button(DC_BTN_X, 3);
 		set_button(DC_BTN_START, 9);
 

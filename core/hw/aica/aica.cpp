@@ -7,6 +7,7 @@
 #include "hw/sh4/sh4_sched.h"
 #include "hw/arm7/arm7.h"
 #include "hw/arm7/arm_mem.h"
+#include "aica_thread.h"
 
 namespace aica
 {
@@ -65,6 +66,8 @@ static void update_arm_interrupts()
 static bool UpdateSh4Ints()
 {
 	u32 p_ints = MCIEB->full & MCIPD->full;
+	if (thread::onAicaThread())
+		return p_ints != 0;	// applied by the SH4 thread at its next sample tick
 	if (p_ints)
 	{
 		if ((SB_ISTEXT & SH4_IRQ_BIT) == 0)
@@ -86,6 +89,12 @@ constexpr int AICA_TICK = 4535;		// 44.1 KHz
 
 static int AicaUpdate(int tag, int cycles, int jitter, void *arg)
 {
+	if (thread::active())
+	{
+		thread::sh4Tick();	// the AICA thread computes this sample
+		UpdateSh4Ints();
+		return AICA_TICK;
+	}
 	arm::run(1);
 
 	return AICA_TICK;
@@ -238,6 +247,7 @@ template void writeTimerAndIntReg<>(u32 reg, u32 data);
 
 void midiSend(u8 data)
 {
+	thread::Sync sync;
 	midiSendBuffer.push_back(data);
 	SCIPD->MIDI_IN = 1;
 	update_arm_interrupts();
@@ -254,10 +264,12 @@ void init()
 	if (aica_schid == -1)
 		aica_schid = sh4_sched_register(0, &AicaUpdate);
 	arm::init();
+	thread::start();
 }
 
 void reset(bool hard)
 {
+	thread::Sync sync;
 	if (hard)
 	{
 		initMem();
@@ -269,10 +281,12 @@ void reset(bool hard)
 		timers[i].Init(aica_reg, i);
 	resetRtc(hard);
 	arm::reset();
+	thread::resync();
 }
 
 void term()
 {
+	thread::stop();
 	arm::term();
 	sgc::term();
 	termMem();

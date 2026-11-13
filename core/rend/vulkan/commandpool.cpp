@@ -18,6 +18,8 @@
 */
 #include "commandpool.h"
 #include "vulkan_context.h"
+#include "easycast_gpufreq.h"
+#include <chrono>
 
 void CommandPool::Init(size_t chainSize)
 {
@@ -64,7 +66,10 @@ void CommandPool::BeginFrame()
 		return;
 	frameStarted = true;
 	index = (index + 1) % chainSize;
+	const auto easycastT0 = std::chrono::steady_clock::now();
 	vk::Result res = device.waitForFences(fences[index].get(), true, UINT64_MAX);
+	easycast_gpufreq::dev().fenceNs.fetch_add((uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
+			std::chrono::steady_clock::now() - easycastT0).count(), std::memory_order_relaxed);
 	if (res != vk::Result::eSuccess)
 		WARN_LOG(RENDERER, "CommandPool::BeginFrame: waitForFences failed %d", (int)res);
 	std::vector<vk::UniqueCommandBuffer>& inFlightBuf = inFlightBuffers[index];

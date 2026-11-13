@@ -3,12 +3,16 @@
 #include "quad.h"
 #include "rend/osd.h"
 #include "naomi2.h"
+#include "easycast_timing.h"
+#include "easycast_draw_stats.h"
 #ifdef LIBRETRO
 #include "postprocess.h"
 #include "vmu_xhair.h"
 #endif
 
 #include <memory>
+
+thread_local EasycastDrawStats easycastDrawStats;
 
 /*
 
@@ -165,6 +169,12 @@ void SetGPState(const PolyParam* gp,u32 cflip=0)
 								  ShaderUniforms.dithering);
 	
 	glcache.UseProgram(CurrentShader->program);
+	if (CurrentShader->uniformGeneration != glesUniformGeneration)
+	{
+		ShaderUniforms.Set(CurrentShader);
+		resetN2UniformCache(CurrentShader);
+		CurrentShader->uniformGeneration = glesUniformGeneration;
+	}
 	if (CurrentShader->trilinear_alpha != -1)
 		glUniform1f(CurrentShader->trilinear_alpha, trilinear_alpha);
 	if (gpuPalette != 0)
@@ -237,14 +247,13 @@ void SetGPState(const PolyParam* gp,u32 cflip=0)
 		{
 			if (config::AnisotropicFiltering > 1 && !nearest_filter)
 			{
-				glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY,
-						std::min<float>(config::AnisotropicFiltering, gl.max_anisotropy));
+				glcache.TexAnisotropy(std::min<float>(config::AnisotropicFiltering, gl.max_anisotropy));
 				// Set the recommended minification filter for best results
 				if (mipmapped && Type != ListType_Punch_Through)
 					glcache.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
 			}
 			else
-				glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, 1.f);
+				glcache.TexAnisotropy(1.f);
 		}
 	}
 
@@ -301,9 +310,20 @@ void DrawList(const std::vector<PolyParam>& gply, int first, int count)
 				&& params->isp.DepthMode == 0)
 			// depthFunc = never
 			continue;
+		auto& stats = easycastDrawStats;
+		++stats.draws;
+		const bool sample = (++stats.sequence % 32) == 0;
+		auto before = sample ? EasycastTiming::Clock::now() : EasycastTiming::Clock::time_point{};
 		SetGPState<Type,SortingEnabled>(params);
+		auto afterState = sample ? EasycastTiming::Clock::now() : before;
 		glDrawElements(GL_TRIANGLE_STRIP, params->count, gl.index_type,
 				(GLvoid*)(gl.get_index_size() * params->first)); glCheck();
+		if (sample) {
+			const auto afterDraw = EasycastTiming::Clock::now();
+			++stats.sampled;
+			stats.stateUs += std::chrono::duration_cast<std::chrono::microseconds>(afterState - before).count();
+			stats.drawUs += std::chrono::duration_cast<std::chrono::microseconds>(afterDraw - afterState).count();
+		}
 	}
 }
 
@@ -319,9 +339,20 @@ static void drawSorted(int first, int count, bool multipass)
 	for (int p = first; p < end; p++)
 	{
 		const PolyParam* params = &gl.rendContext->global_param_tr[gl.rendContext->sortedTriangles[p].polyIndex];
+		auto& stats = easycastDrawStats;
+		++stats.draws;
+		const bool sample = (++stats.sequence % 32) == 0;
+		auto before = sample ? EasycastTiming::Clock::now() : EasycastTiming::Clock::time_point{};
 		SetGPState<ListType_Translucent,true>(params);
+		auto afterState = sample ? EasycastTiming::Clock::now() : before;
 		glDrawElements(GL_TRIANGLES, gl.rendContext->sortedTriangles[p].count, gl.index_type,
 				(GLvoid*)(gl.get_index_size() * gl.rendContext->sortedTriangles[p].first));
+		if (sample) {
+			const auto afterDraw = EasycastTiming::Clock::now();
+			++stats.sampled;
+			stats.stateUs += std::chrono::duration_cast<std::chrono::microseconds>(afterState - before).count();
+			stats.drawUs += std::chrono::duration_cast<std::chrono::microseconds>(afterDraw - afterState).count();
+		}
 	}
 
 	if (multipass && config::TranslucentPolygonDepthMask)
@@ -593,6 +624,10 @@ void DrawModVols(int first, int count)
 
 void DrawStrips()
 {
+	static thread_local EasycastTiming opaqueTiming("gl_draw_opaque");
+	static thread_local EasycastTiming punchTiming("gl_draw_punch");
+	static thread_local EasycastTiming modifierTiming("gl_draw_modifier");
+	static thread_local EasycastTiming translucentTiming("gl_draw_translucent");
 	SetupMainVBO();
 	//Draw the strips !
 
@@ -615,16 +650,23 @@ void DrawStrips()
 		glcache.DepthMask(GL_TRUE);
 
 		//Opaque
+		auto stageStart = EasycastTiming::Clock::now();
 		DrawList<ListType_Opaque,false>(gl.rendContext->global_param_op, previous_pass.op_count, current_pass.op_count - previous_pass.op_count);
+		opaqueTiming.record(stageStart);
 
 		//Alpha tested
+		stageStart = EasycastTiming::Clock::now();
 		DrawList<ListType_Punch_Through,false>(gl.rendContext->global_param_pt, previous_pass.pt_count, current_pass.pt_count - previous_pass.pt_count);
+		punchTiming.record(stageStart);
 
 		// Modifier volumes
+		stageStart = EasycastTiming::Clock::now();
 		if (config::ModifierVolumes)
 			DrawModVols(previous_pass.mvo_count, current_pass.mvo_count - previous_pass.mvo_count);
+		modifierTiming.record(stageStart);
 
 		//Alpha blended
+		stageStart = EasycastTiming::Clock::now();
 		{
 			if (current_pass.autosort)
             {
@@ -636,8 +678,11 @@ void DrawStrips()
 			else
 				DrawList<ListType_Translucent,false>(gl.rendContext->global_param_tr, previous_pass.tr_count, current_pass.tr_count - previous_pass.tr_count);
 		}
+		translucentTiming.record(stageStart);
 		previous_pass = current_pass;
 	}
+	++easycastDrawStats.frames;
+	easycastDrawStats.report();
 }
 
 void OpenGLRenderer::RenderFramebuffer(const FramebufferInfo& info)

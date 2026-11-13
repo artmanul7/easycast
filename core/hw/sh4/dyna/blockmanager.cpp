@@ -16,6 +16,10 @@
 #include "hw/sh4/sh4_sched.h"
 #include "hw/sh4/modules/mmu.h"
 #include "oslib/virtmem.h"
+#include "hw/mem/addrspace.h"
+#include <unistd.h>
+#include <cstdio>
+#include <cstdlib>
 
 #if defined(__unix__) && defined(DYNA_OPROF)
 #include <opagent.h>
@@ -262,9 +266,79 @@ void bm_DiscardBlock(RuntimeBlockInfo* block)
 	block_ptr->Discard();
 }
 
+
+// EasyCast (Claude): JIT block map for the CPU sampler. EASYCAST_BLOCKDUMP=<file>: when <file>.trigger exists,
+// the next 1-second tick takes a quick snapshot (block table + 16 MB main RAM copy, a few ms on the SH4 thread) and a
+// background thread writes every compiled SH4 block (host code range -> guest address + SH4 disassembly) to <file>
+// and the RAM to <file>.ram. 0.2.0 test fix: the old version wrote everything on the SH4 thread (~1 s freeze).
+#include <atomic>
+#include <thread>
+#include <vector>
+
+struct EasycastBlockRec { void *code; u32 hostSize, addr, vaddr; int type; u32 cycles, ops, branch, next, sh4size;
+	std::vector<u8> hostBytes; };
+static std::atomic<bool> easycast_dumpBusy { false };
+
+static void easycast_blockdump()
+{
+	static const char *path = getenv("EASYCAST_BLOCKDUMP");
+	if (path == nullptr || *path == '\0')
+		return;
+	std::string trig = std::string(path) + ".trigger";
+	if (access(trig.c_str(), F_OK) != 0 || easycast_dumpBusy.load())
+		return;
+	unlink(trig.c_str());
+	easycast_dumpBusy = true;
+	std::vector<EasycastBlockRec> recs;
+	recs.reserve(blkmap.size());
+	for (const auto& [key, block] : blkmap)
+	{
+		recs.push_back({ (void *)block->code, block->host_code_size, block->addr, block->vaddr, (int)block->BlockType,
+				block->guest_cycles, block->guest_opcodes, block->BranchBlock, block->NextBlock, block->sh4_code_size, {} });
+		if (block->code != nullptr && block->host_code_size > 0 && block->host_code_size <= 65536)
+			recs.back().hostBytes.assign((const u8 *)block->code, (const u8 *)block->code + block->host_code_size);
+	}
+	std::vector<u8> ram(&mem_b[0], &mem_b[0] + RAM_SIZE);
+	std::string out(path);
+	std::thread([recs = std::move(recs), ram = std::move(ram), out]() {
+		std::string tmp = out + ".tmp";
+		if (FILE *f = fopen(tmp.c_str(), "w"))
+		{
+			for (const EasycastBlockRec& b : recs)
+			{
+				fprintf(f, "B %p %u %08X %08X %d %u %u %08X %08X %u\n", b.code, b.hostSize, b.addr, b.vaddr, b.type,
+						b.cycles, b.ops, b.branch, b.next, b.sh4size);
+				if (!b.hostBytes.empty())
+				{
+					fputs("H ", f);
+					for (u8 x : b.hostBytes)
+						fprintf(f, "%02x", x);
+					fputc(10, f);
+				}
+				if ((b.addr & 0x1C000000) == 0x0C000000 && b.sh4size <= 4096)
+					for (u32 off = 0; off < b.sh4size; off += 2)
+					{
+						u32 a = (b.addr + off) & (u32)(ram.size() - 1);
+						u16 op = (u16)(ram[a] | (ram[a + 1] << 8));
+						fprintf(f, "I %08X %04X %s\n", b.vaddr + off, op, OpDesc[op]->diss);
+					}
+			}
+			fclose(f);
+		}
+		if (FILE *r = fopen((out + ".ram").c_str(), "wb"))
+		{
+			fwrite(ram.data(), 1, ram.size(), r);
+			fclose(r);
+		}
+		rename(tmp.c_str(), out.c_str());
+		easycast_dumpBusy = false;
+	}).detach();
+}
+
 void bm_Periodical_1s()
 {
 	bm_CleanupDeletedBlocks();
+	easycast_blockdump();
 }
 
 void bm_vmem_pagefill(void** ptr, u32 size_bytes)

@@ -37,7 +37,7 @@ static eFReg alloc_fregs[] = { S8, S9, S10, S11, S12, S13, S14, S15, (eFReg)-1 }
 
 class Arm64Assembler;
 
-struct Arm64RegAlloc : RegAlloc<eReg, eFReg, ALLOC_F64>
+struct Arm64RegAlloc : RegAlloc<eReg, eFReg, ALLOC_F64, true>
 {
 	Arm64RegAlloc(Arm64Assembler *assembler) : assembler(assembler) {}
 
@@ -48,6 +48,7 @@ struct Arm64RegAlloc : RegAlloc<eReg, eFReg, ALLOC_F64>
 
 	void Preload(u32 reg, eReg nreg) override;
 	void Writeback(u32 reg, eReg nreg) override;
+	bool WritebackPair(u32 reg1, eReg host1, u32 reg2, eReg host2) override;
 	void Preload_FPU(u32 reg, eFReg nreg) override;
 	void Writeback_FPU(u32 reg, eFReg nreg) override;
 

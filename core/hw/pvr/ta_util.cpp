@@ -19,6 +19,7 @@
 #include "ta_ctx.h"
 #include "pvr_mem.h"
 #include <algorithm>
+#include <cstring>
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
@@ -27,10 +28,21 @@
 //
 static bool is_vertex_inf(const Vertex& vtx)
 {
-	// manic panic ghosts needs 1.0e25f for x and y
-	return std::isnan(vtx.x) || fabsf(vtx.x) > 1e25f
-			|| std::isnan(vtx.y) || fabsf(vtx.y) > 1e25f
-			|| std::isnan(vtx.z) || vtx.z > 3.4e37f;
+	// IEEE-754 bit ordering gives the same classification, including both
+	// NaN signs. Preserve the original asymmetric z test: -Inf is allowed.
+	static_assert(sizeof(float) == sizeof(u32), "32-bit float required");
+	const float xyLimit = 1e25f;
+	const float zLimit = 3.4e37f;
+	u32 x, y, z, xyMax, zMax;
+	std::memcpy(&x, &vtx.x, sizeof(x));
+	std::memcpy(&y, &vtx.y, sizeof(y));
+	std::memcpy(&z, &vtx.z, sizeof(z));
+	std::memcpy(&xyMax, &xyLimit, sizeof(xyMax));
+	std::memcpy(&zMax, &zLimit, sizeof(zMax));
+	return (x & 0x7fffffffU) > xyMax
+			|| (y & 0x7fffffffU) > xyMax
+			|| (z & 0x7fffffffU) > 0x7f800000U
+			|| (z < 0x80000000U && z > zMax);
 }
 
 struct IndexTrig
@@ -371,6 +383,12 @@ void makePrimRestartIndex(std::vector<PolyParam>& polys, int first, int end, boo
 		return;
 	PolyParam *last_poly = nullptr;
 	const PolyParam *end_poly = polys.data() + end;
+	{	// EasyCast: one reservation instead of repeated growth (each vertex <= 2 indices, + 1 restart per poly)
+		size_t need = 0;
+		for (const PolyParam *p = &polys[first]; p != end_poly; p++)
+			need += 2 * (size_t)p->count + 2;
+		ctx.idx.reserve(ctx.idx.size() + need);
+	}
 	for (PolyParam *poly = &polys[first]; poly != end_poly; poly++)
 	{
 		int first_index;
@@ -389,11 +407,12 @@ void makePrimRestartIndex(std::vector<PolyParam>& polys, int first, int end, boo
 			last_poly = poly;
 			first_index = ctx.idx.size();
 		}
+		const bool checkVertices = !poly->isNaomi2();
 		int last_good_vtx = -1;
 		for (u32 i = 0; i < poly->count; i++)
 		{
 			const Vertex& vtx = ctx.verts[poly->first + i];
-			if (!poly->isNaomi2() && is_vertex_inf(vtx))
+			if (checkVertices && is_vertex_inf(vtx))
 			{
 				bool odd = i & 1;
 				while (i < poly->count - 1)
@@ -486,11 +505,12 @@ void makeIndex(std::vector<PolyParam>& polys, int first, int end, bool merge, re
 			first_index = ctx.idx.size();
 			cullingReversed = false;
 		}
+		const bool checkVertices = !poly->isNaomi2();
 		int last_good_vtx = -1;
 		for (u32 i = 0; i < poly->count; i++)
 		{
 			const Vertex& vtx = ctx.verts[poly->first + i];
-			if (!poly->isNaomi2() && is_vertex_inf(vtx))
+			if (checkVertices && is_vertex_inf(vtx))
 			{
 				while (i < poly->count - 1)
 				{

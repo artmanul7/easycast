@@ -12,6 +12,10 @@
 
 #include <algorithm>
 #include <utility>
+#include <cstring>
+#if defined(__aarch64__)
+#include <arm_neon.h>
+#endif
 
 #define TACALL DYNACALL
 #ifdef NDEBUG
@@ -313,6 +317,20 @@ case num : {\
 	template <u32 poly_type,u32 poly_size>
 	static Ta_Dma* TACALL ta_poly_data(Ta_Dma* data,Ta_Dma* data_end)
 	{
+#if defined(__aarch64__)
+		// This call consumes vertex data only and returns at the strip end.
+		// Face colors cannot change until control returns to the header parser.
+		uint8x8_t cachedFaces{};
+		if constexpr (poly_type == 7)
+		{
+			u32 base, offset;
+			std::memcpy(&base, FaceBaseColor, 4);
+			std::memcpy(&offset, FaceOffsColor, 4);
+			uint32x2_t words = vdup_n_u32(base);
+			words = vset_lane_u32(offset, words, 1);
+			cachedFaces = vreinterpret_u8_u32(words);
+		}
+#endif
 		verify(data < data_end);
 
 					//If SZ64  && 32 bytes
@@ -324,7 +342,12 @@ case num : {\
 		do
 		{
 			verify(data->pcw.ParaType == ParamType_Vertex_Parameter);
-			ta_handle_poly<poly_type,0>(data, 0);
+#if defined(__aarch64__)
+			if constexpr (poly_type == 7)
+				AppendPolyVertex7(&((TA_VertexParam*)data)->vtx7, &cachedFaces);
+			else
+#endif
+				ta_handle_poly<poly_type,0>(data, 0);
 			if (data->pcw.EndOfStrip)
 				goto strip_end;
 			data += poly_size;
@@ -836,15 +859,55 @@ private:
 		vert_float_color(spc,Offs);
 	}
 
-	//(Textured, Intensity)
-	static void AppendPolyVertex7(TA_Vertex7* vtx)
+#if defined(__aarch64__)
+	static void intensity_colors_neon(Vertex* cv, u8 baseIntensity, u8 offsetIntensity, const uint8x8_t* cachedFaces = nullptr)
 	{
-		vert_cvt_base;
+		static_assert(offsetof(Vertex, spc) == offsetof(Vertex, col) + 4);
+		uint8x8_t faces;
+		if (cachedFaces != nullptr)
+			faces = *cachedFaces;
+		else
+		{
+			u32 base, offset;
+			std::memcpy(&base, FaceBaseColor, 4);
+			std::memcpy(&offset, FaceOffsColor, 4);
+			uint32x2_t words = vdup_n_u32(base);
+			words = vset_lane_u32(offset, words, 1);
+			faces = vreinterpret_u8_u32(words);
+		}
+		const uint8x8_t intensities = vext_u8(vdup_n_u8(baseIntensity), vdup_n_u8(offsetIntensity), 4);
+		// Exact unsigned products followed by truncating /256, as in scalar code.
+		const uint8x8_t scaled = vshrn_n_u16(vmull_u8(faces, intensities), 8);
+		constexpr u64 alphaBits = (0xffULL << (Alpha * 8)) | (0xffULL << ((Alpha + 4) * 8));
+		const uint8x8_t result = vbsl_u8(vcreate_u8(alphaBits), faces, scaled);
+		std::memcpy(reinterpret_cast<u8*>(cv) + offsetof(Vertex, col), &result, 8);
+	}
+#endif
 
+	//(Textured, Intensity)
+	static void AppendPolyVertex7(TA_Vertex7* vtx
+#if defined(__aarch64__)
+			, const uint8x8_t* cachedFaces = nullptr
+#endif
+			)
+	{
+		// Build the final value before appending. This lets the compiler avoid
+		// zeroing fields in the vector that are immediately overwritten.
+		Vertex vertex{};
+		Vertex* cv = &vertex;
+		cv->x = vtx->xyz[0];
+		cv->y = vtx->xyz[1];
+		cv->z = vtx->xyz[2];
+		update_fz(cv->z);
+
+#if defined(__aarch64__)
+		intensity_colors_neon(cv, float_to_satu8(vtx->BaseInt), float_to_satu8(vtx->OffsInt), cachedFaces);
+#else
 		vert_face_base_color(BaseInt);
 		vert_face_offs_color(OffsInt);
-
+#endif
 		vert_uv_32(u,v);
+		vd_rc.verts.push_back(vertex);
 	}
 
 	//(Textured, Intensity, 16bit UV)

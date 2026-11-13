@@ -19,6 +19,7 @@
     along with Flycast.  If not, see <https://www.gnu.org/licenses/>.
 */
 #include "texture.h"
+#include "easycast_diag.h"
 
 #include <algorithm>
 #include <memory>
@@ -149,6 +150,7 @@ void setImageLayout(vk::CommandBuffer const& commandBuffer, vk::Image image, vk:
 
 void Texture::UploadToGPU(int width, int height, const u8 *data, bool mipmapped, bool mipmapsIncluded)
 {
+	easycast_diag::Scope easycastScope(easycast_diag::c().texNs, easycast_diag::c().texs);
 	vk::Format format = vk::Format::eUndefined;
 	u32 dataSize = width * height * 2;
 	switch (tex_type)

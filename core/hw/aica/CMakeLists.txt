@@ -5,6 +5,8 @@ target_sources(${PROJECT_NAME} PRIVATE
         aica_if.h
         aica_mem.cpp
         aica_mem.h
+        aica_thread.cpp
+        aica_thread.h
         dsp.cpp
         dsp.h
         dsp_arm32.cpp

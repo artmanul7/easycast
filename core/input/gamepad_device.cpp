@@ -21,6 +21,7 @@
 #include "cfg/cfg.h"
 #include "stdclass.h"
 #include "ui/gui.h"
+#include "ui/easycast_bright.h"
 #include "emulator.h"
 #include "hw/maple/maple_devs.h"
 #include "mouse.h"
@@ -142,6 +143,14 @@ bool GamepadDevice::handleButtonInput(int port, DreamcastKey key, bool pressed)
 		case EMU_BTN_SCREENSHOT:
 			if (pressed)
 				gui_takeScreenshot();
+			break;
+		case EMU_BTN_BRIGHT_UP:		// EasyCast 0.2.8
+			if (pressed)
+				easycast_bright::step(1);
+			break;
+		case EMU_BTN_BRIGHT_DOWN:
+			if (pressed)
+				easycast_bright::step(-1);
 			break;
 		case DC_AXIS_LT:
 			if (port >= 0)

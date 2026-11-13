@@ -178,12 +178,85 @@ bool dc_savestateAllowed() {
 			&& !settings.naomi.multiboard && !MapleLink::StorageEnabled();
 }
 
+// EasyCast 0.2.2 (Claude): a savestate used to be compressed (zlib, ~28 MB) and written on the calling thread while
+// the game waited (14.11: pauses of several seconds). Now the state is serialized as before (fast, consistent), and
+// a background thread compresses and writes the same file format. Loading a state or saving again waits for it.
+// EASYCAST_ASYNC_SAVE=0 -> old synchronous behaviour. Journal: EASYCAST_SAVESTATE serialize_ms / write_ms.
+#include <chrono>
+#include <cstdlib>
+#include <cstring>
+#include <mutex>
+#include <thread>
+#include <vector>
+
+static std::thread easycast_saveThread;
+static std::mutex easycast_saveMutex;
+
+void easycast_savestate_wait()
+{
+	std::lock_guard<std::mutex> lk(easycast_saveMutex);
+	if (easycast_saveThread.joinable())
+		easycast_saveThread.join();
+}
+
+static bool easycast_asyncSave()
+{
+	const char *e = std::getenv("EASYCAST_ASYNC_SAVE");
+	return !(e != nullptr && std::strcmp(e, "0") == 0);
+}
+
+// compress + write one regular savestate file (takes ownership of data)
+static void easycast_writeState(void *data, size_t size, std::vector<u8> png, std::string filename, bool async,
+		std::chrono::steady_clock::time_point t0, double serializeMs)
+{
+	hostfs::File *f = hostfs::storage().openFile(filename.c_str(), "wb");
+	if (f == nullptr)
+	{
+		WARN_LOG(SAVESTATE, "Failed to save state - could not open %s for writing", filename.c_str());
+		os_notify(i18n::T("Cannot open save file"), 5000);
+		free(data);
+		return;
+	}
+	RZipFile zipFile;
+	SavestateHeader header;
+	header.init();
+	header.pngSize = (u32)png.size();
+	bool ok = f->write(&header, sizeof(header), 1) == 1
+			&& (png.empty() || f->write(png.data(), 1, png.size()) == png.size());
+	if (ok && zipFile.Open(f, true))
+	{
+		ok = zipFile.Write(data, size) == size;
+		zipFile.Close();
+	}
+	else
+	{
+		ok = false;
+		delete f;
+	}
+	free(data);
+	double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+	std::fprintf(stderr, "EASYCAST_SAVESTATE async=%d serialize_ms=%.0f total_ms=%.0f size=%zu ok=%d\n", async ? 1 : 0,
+			serializeMs, ms, size, ok ? 1 : 0);
+	if (ok)
+	{
+		NOTICE_LOG(SAVESTATE, "Saved state to %s size %d", filename.c_str(), (int)size);
+		os_notify(i18n::T("State saved"), 2000);
+	}
+	else
+	{
+		WARN_LOG(SAVESTATE, "Failed to save state - error writing %s", filename.c_str());
+		os_notify(i18n::T("Error saving state"), 5000);
+	}
+}
+
 void dc_savestate(int index, const u8 *pngData, u32 pngSize)
 {
 	if (!dc_savestateAllowed())
 		return;
 
+	easycast_savestate_wait();
 	lastStateFile.clear();
+	const auto easycastT0 = std::chrono::steady_clock::now();
 
 	Serializer ser;
 	dc_serialize(ser);
@@ -198,6 +271,19 @@ void dc_savestate(int index, const u8 *pngData, u32 pngSize)
 
 	ser = Serializer(data, ser.size());
 	dc_serialize(ser);
+
+	if (index != -2 && easycast_asyncSave())
+	{
+		double serMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - easycastT0).count();
+		std::vector<u8> png;
+		if (pngData != nullptr && pngSize > 0)
+			png.assign(pngData, pngData + pngSize);
+		std::string fname = hostfs::getSavestatePath(index, true);
+		std::lock_guard<std::mutex> lk(easycast_saveMutex);
+		easycast_saveThread = std::thread(easycast_writeState, data, (size_t)ser.size(), std::move(png), fname, true,
+				easycastT0, serMs);
+		return;
+	}
 
 	hostfs::File *f = nullptr;
 	std::string filename = "";
@@ -263,6 +349,7 @@ fail:
 
 void dc_loadstate(int index)
 {
+	easycast_savestate_wait();
 	if (!dc_savestateAllowed() || settings.raHardcoreMode)
 		return;
 	u32 total_size = 0;

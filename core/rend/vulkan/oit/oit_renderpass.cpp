@@ -82,6 +82,9 @@ vk::UniqueRenderPass RenderPasses::MakeRenderPass(bool initial, bool last, bool 
 			vk::AccessFlagBits::eInputAttachmentRead | vk::AccessFlagBits::eShaderRead, vk::DependencyFlagBits::eByRegion);
     dependencies.emplace_back(1, 2, vk::PipelineStageFlagBits::eColorAttachmentOutput, vk::PipelineStageFlagBits::eFragmentShader,
     		vk::AccessFlagBits::eColorAttachmentWrite, vk::AccessFlagBits::eInputAttachmentRead, vk::DependencyFlagBits::eByRegion);
+    // EasyCast: opaque colour may be drawn in subpass 0 (Pass::ColorPre)
+    dependencies.emplace_back(0, 2, vk::PipelineStageFlagBits::eColorAttachmentOutput, vk::PipelineStageFlagBits::eFragmentShader,
+    		vk::AccessFlagBits::eColorAttachmentWrite, vk::AccessFlagBits::eInputAttachmentRead, vk::DependencyFlagBits::eByRegion);
     // This dependency is only needed if the render pass isn't the last: it's needed for the depth-only Tr pass
     // Unfortunately we want all render passes to be compatible, and that means all attachments must be identical
     dependencies.emplace_back(1, 2, vk::PipelineStageFlagBits::eFragmentShader,

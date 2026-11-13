@@ -11,6 +11,9 @@
 #include "hw/sh4/sh4_sched.h"
 #include "profiler/fc_profiler.h"
 #include "network/ggpo.h"
+#include "easycast_timing.h"
+#include "easycast_timeline.h"
+#include "easycast_hitch.h"
 
 #include <mutex>
 #include <deque>
@@ -93,6 +96,7 @@ public:
 							{
 								if (it->type == Present)
 								{
+									easycast_diag::c().presentDrops++;	// a finished frame is never shown
 									queue.erase(it);
 									break;
 								}
@@ -106,7 +110,12 @@ public:
 				{
 					if (type == Stop)
 						return;
+					static thread_local EasycastTiming timing("enqueue_wait");
+					const auto start = EasycastTiming::Clock::now();
+					easycast_tl::mark(0, easycast_tl::E_ENQ_WAIT_BEGIN);
 					dequeueEvent.Wait();
+					easycast_tl::mark(0, easycast_tl::E_ENQ_WAIT_END);
+					timing.record(start);
 				}
 			} while (dupe);
 			enqueueEvent.Set();
@@ -164,9 +173,17 @@ private:
 				dequeueEvent.Set();
 				break;
 			}
+			static thread_local EasycastTiming timing("queue_idle");
+			easycast_tl::mark(1, easycast_tl::R_IDLE_BEGIN);
+			const auto start = EasycastTiming::Clock::now();
+			bool awakened = true;
 			if (timeoutMs == -1)
 				enqueueEvent.Wait();
-			else if (!enqueueEvent.Wait(timeoutMs))
+			else
+				awakened = enqueueEvent.Wait(timeoutMs);
+			timing.record(start);
+			easycast_tl::mark(1, easycast_tl::R_IDLE_END);
+			if (!awakened)
 				break;
 		}
 		return msg;
@@ -196,6 +213,7 @@ private:
 	{
 		FC_PROFILE_SCOPE;
 
+		easycast_tl::mark(1, easycast_tl::R_RENDER_BEGIN);
 		TA_context *taContext = DequeueRender();
 		if (taContext == nullptr)
 			return;
@@ -205,6 +223,7 @@ private:
 		taContext->rend.framebufferWidth = width;
 		taContext->rend.framebufferHeight = height;
 		bool renderToScreen = !taContext->rend.isRTT && !config::EmulateFramebuffer;
+		if (!renderToScreen) easycast_tl::mark(1, easycast_tl::R_RTT);
 #ifdef LIBRETRO
 		if (renderToScreen)
 			retro_resize_renderer(taContext->rend.framebufferWidth, taContext->rend.framebufferHeight,
@@ -213,7 +232,13 @@ private:
 		{
 			FC_PROFILE_SCOPE_NAMED("Renderer::Process");
 			try {
+				static thread_local EasycastTiming screenTiming("process_screen");
+				static thread_local EasycastTiming textureTiming("process_texture");
+				const auto start = EasycastTiming::Clock::now();
+				easycast_tl::mark(1, easycast_tl::R_PROCESS_BEGIN);
 				renderer->Process(taContext);
+				easycast_tl::mark(1, easycast_tl::R_PROCESS_END);
+				(renderToScreen ? screenTiming : textureTiming).record(start);
 			} catch (...) {
 				renderEnd.Set();
 				rend_allow_rollback();
@@ -222,14 +247,22 @@ private:
 			}
 		}
 
-		if (renderToScreen)
+		if (renderToScreen) {
 			// If rendering to texture or in full framebuffer emulation, continue locking until the frame is rendered
 			renderEnd.Set();
+			easycast_tl::mark(1, easycast_tl::R_RENDEREND_SET);
+		}
 		rend_allow_rollback();
 		{
 			FC_PROFILE_SCOPE_NAMED("Renderer::Render");
 			try {
+				static thread_local EasycastTiming screenTiming("render_screen");
+				static thread_local EasycastTiming textureTiming("render_texture");
+				const auto start = EasycastTiming::Clock::now();
+				easycast_tl::mark(1, easycast_tl::R_DRAW_BEGIN);
 				renderer->Render();
+				easycast_tl::mark(1, easycast_tl::R_DRAW_END);
+				(renderToScreen ? screenTiming : textureTiming).record(start);
 			} catch (...) {
 				if (!renderToScreen)
 					renderEnd.Set();
@@ -238,13 +271,16 @@ private:
 			}
 		}
 
-		if (!renderToScreen)
+		if (!renderToScreen) {
 			renderEnd.Set();
+			easycast_tl::mark(1, easycast_tl::R_RENDEREND_SET);
+		}
 		else if (config::DelayFrameSwapping && fb_w_cur == FB_R_SOF1)
 			present();
 
 		//clear up & free data ..
 		FinishRender(taContext);
+		easycast_tl::mark(1, easycast_tl::R_RENDER_END);
 	}
 
 	void renderFramebuffer(const FramebufferInfo& config)
@@ -263,7 +299,16 @@ private:
 	{
 		FC_PROFILE_SCOPE;
 
-		if (renderer->Present())
+		static thread_local EasycastTiming timing("present_total");
+		const auto start = EasycastTiming::Clock::now();
+		easycast_tl::mark(1, easycast_tl::R_PRESENT_BEGIN);
+		const bool didPresent = renderer->Present();
+		easycast_tl::mark(1, easycast_tl::R_PRESENT_END);
+		easycast_tl::maybeDump();
+		if (didPresent)
+			easycast_hitch::onPresent();
+		timing.record(start);
+		if (didPresent)
 		{
 			presented = true;
 			if (!config::ThreadedRendering && !ggpo::active())
@@ -496,6 +541,7 @@ void rend_reset()
 
 void rend_start_render()
 {
+	easycast_tl::mark(0, easycast_tl::E_START_RENDER);
 	render_called = true;
 	pend_rend = false;
 
@@ -570,6 +616,7 @@ void rend_start_render()
 		palette_update();
 		pend_rend = true;
 		pvrQueue.enqueue(PvrMessageQueue::Render);
+		easycast_tl::mark(0, easycast_tl::E_QUEUED);
 		if (!config::DelayFrameSwapping && !ctx->rend.isRTT && !config::EmulateFramebuffer)
 			pvrQueue.enqueue(PvrMessageQueue::Present);
 	}
@@ -577,6 +624,7 @@ void rend_start_render()
 
 int rend_end_render(int tag, int cycles, int jitter, void *arg)
 {
+	easycast_tl::mark(0, easycast_tl::E_RENDER_DONE_CB);
 	if (settings.platform.isNaomi2())
 	{
 		asic_RaiseInterruptBothCLX(holly_RENDER_DONE);
@@ -590,13 +638,21 @@ int rend_end_render(int tag, int cycles, int jitter, void *arg)
 		asic_RaiseInterrupt(holly_RENDER_DONE_vd);
 	}
 	if (pend_rend && config::ThreadedRendering)
+	{
+		static thread_local EasycastTiming timing("render_wait");
+		const auto start = EasycastTiming::Clock::now();
+		easycast_tl::mark(0, easycast_tl::E_WAIT_BEGIN);
 		renderEnd.Wait();
+		easycast_tl::mark(0, easycast_tl::E_WAIT_END);
+		timing.record(start);
+	}
 
 	return 0;
 }
 
 void rend_vblank()
 {
+	easycast_tl::mark(0, easycast_tl::E_VBLANK);
 	if (config::EmulateFramebuffer
 			|| (!render_called && fb_dirty && FB_R_CTRL.fb_enable))
 	{
@@ -665,7 +721,14 @@ void rend_allow_rollback()
 void rend_start_rollback()
 {
 	if (config::ThreadedRendering)
+	{
+		static thread_local EasycastTiming timing("vram_wait");
+		const auto start = EasycastTiming::Clock::now();
+		easycast_tl::mark(0, easycast_tl::E_VRAM_WAIT_BEGIN);
 		vramRollback.Wait();
+		easycast_tl::mark(0, easycast_tl::E_VRAM_WAIT_END);
+		timing.record(start);
+	}
 }
 
 void rend_enable_renderer(bool enabled) {

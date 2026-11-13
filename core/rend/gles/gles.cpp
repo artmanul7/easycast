@@ -12,6 +12,7 @@
 #include "emulator.h"
 #include "naomi2.h"
 #include "oslib/i18n.h"
+#include "easycast_timing.h"
 
 #ifdef TEST_AUTOMATION
 #include "cfg/cfg.h"
@@ -710,6 +711,8 @@ GLuint gl_CompileAndLink(const char *vertexShader, const char *fragmentShader)
 	return program;
 }
 
+u64 glesUniformGeneration = 1;
+
 PipelineShader *GetProgram(bool cp_AlphaTest, bool pp_InsideClipping,
 		bool pp_Texture, bool pp_UseAlpha, bool pp_IgnoreTexA, u32 pp_ShadInstr, bool pp_Offset,
 		u32 pp_FogCtrl, bool pp_Gouraud, bool pp_BumpMap, bool fog_clamping, bool trilinear,
@@ -1080,7 +1083,10 @@ void OpenGLRenderer::Process(TA_context* ctx)
 	}
 	if (!ctx->rend.isRTT && ctx->rend.swapInterval > 0)
 		GraphicsContext::Instance()->setSwapInterval(ctx->rend.swapInterval);
+	static thread_local EasycastTiming parseTiming("gl_parse");
+	const auto parseStart = EasycastTiming::Clock::now();
 	ta_parse(ctx, gl.prim_restart_fixed_supported || gl.prim_restart_supported);
+	parseTiming.record(parseStart);
 }
 
 static void upload_vertex_indices()
@@ -1101,6 +1107,11 @@ static void upload_vertex_indices()
 
 bool OpenGLRenderer::renderFrame(int width, int height)
 {
+	static thread_local EasycastTiming setupTiming("gl_setup");
+	static thread_local EasycastTiming uploadTiming("gl_geometry_upload");
+	static thread_local EasycastTiming drawTiming("gl_draw_all");
+	static thread_local EasycastTiming finishTiming("gl_frame_finish");
+	auto stageStart = EasycastTiming::Clock::now();
 	if (!config::EmulateFramebuffer)
 		initVideoRoutingFrameBuffer();
 	
@@ -1178,12 +1189,9 @@ bool OpenGLRenderer::renderFrame(int width, int height)
 		ShaderUniforms.dithering = false;
 	}
 
-	for (auto& it : gl.shaders)
-	{
-		glcache.UseProgram(it.second.program);
-		ShaderUniforms.Set(&it.second);
-		resetN2UniformCache(&it.second);
-	}
+	// Update per-pass uniforms lazily when a program is actually used. Each RTT
+	// and screen pass gets its own generation, even within one emulated frame.
+	++glesUniformGeneration;
 #ifndef GLES2
 	if (gl.prim_restart_fixed_supported)
 		glEnable(GL_PRIMITIVE_RESTART_FIXED_INDEX);
@@ -1238,6 +1246,8 @@ bool OpenGLRenderer::renderFrame(int width, int height)
 
 	if (is_rtt || gl.rendContext->clearFramebuffer)
 		glClear(GL_COLOR_BUFFER_BIT);
+	setupTiming.record(stageStart);
+	stageStart = EasycastTiming::Clock::now();
 	//move vertex to gpu
 	//Main VBO
 	gl.vbo.geometry->update(&gl.rendContext->verts[0], gl.rendContext->verts.size() * sizeof(decltype(gl.rendContext->verts[0])));
@@ -1247,6 +1257,8 @@ bool OpenGLRenderer::renderFrame(int width, int height)
 	//Modvol VBO
 	if (!gl.rendContext->modtrig.empty())
 		gl.vbo.modvols->update(&gl.rendContext->modtrig[0], gl.rendContext->modtrig.size() * sizeof(decltype(gl.rendContext->modtrig[0])));
+	uploadTiming.record(stageStart);
+	stageStart = EasycastTiming::Clock::now();
 
 	Rect scissor = gl.matrices.getBaseScissor();
 	ShaderUniforms.base_clipping.x = scissor.origin.x;
@@ -1274,6 +1286,8 @@ bool OpenGLRenderer::renderFrame(int width, int height)
 	}
 
 	DrawStrips();
+	drawTiming.record(stageStart);
+	stageStart = EasycastTiming::Clock::now();
 #ifdef LIBRETRO
 	if (!is_rtt && !config::EmulateFramebuffer)
 		postProcessor.render(glsm_get_current_framebuffer());
@@ -1291,6 +1305,7 @@ bool OpenGLRenderer::renderFrame(int width, int height)
 #endif
 	}
 	GlVertexArray::unbind();
+	finishTiming.record(stageStart);
 
 	return !is_rtt;
 }

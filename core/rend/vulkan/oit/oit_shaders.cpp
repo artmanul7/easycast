@@ -22,6 +22,7 @@
 #include "../compiler.h"
 #include "rend/gl4/glsl.h"
 #include "cfg/option.h"
+#include "easycast_oit.h"
 
 extern const char *FragmentShaderCommon;
 
@@ -83,6 +84,28 @@ void main()
 )";
 
 static const char OITShaderHeader[] = R"(
+#ifndef EASYCAST_OIT_AGG
+#define EASYCAST_OIT_AGG 0
+#endif
+#ifndef EASYCAST_OIT_X
+#define EASYCAST_OIT_X 0
+#endif
+#ifndef EASYCAST_OIT_LOCAL
+#define EASYCAST_OIT_LOCAL 0
+#endif
+#ifndef EASYCAST_OIT_SEL
+#define EASYCAST_OIT_SEL 0
+#endif
+#ifndef EASYCAST_NOSTENCIL
+#define EASYCAST_NOSTENCIL 0
+#endif
+#ifndef EASYCAST_PB_QUAL
+#define EASYCAST_PB_QUAL coherent
+#endif
+#if EASYCAST_OIT_AGG == 1
+#extension GL_KHR_shader_subgroup_ballot : enable
+#extension GL_KHR_shader_subgroup_arithmetic : enable
+#endif
 #extension GL_EXT_buffer_reference : enable
 #extension GL_EXT_buffer_reference_uvec2 : enable
 
@@ -117,19 +140,31 @@ OIT_POLY_PARAM
 R"(
 
 #if USE_BDA == 1
-layout(buffer_reference, buffer_reference_align = 16, std430) coherent restrict buffer PixelBufferRef {
+layout(buffer_reference, buffer_reference_align = 16, std430) EASYCAST_PB_QUAL restrict buffer PixelBufferRef {
 	Pixel pixels[];
 };
 #define PixelBuffer PixelBufferRef(uniformBuffer.pixelBufferAddress)
 #else
-layout (set = 0, binding = 7, std430) coherent restrict buffer PixelBuffer_ {
+layout (set = 0, binding = 7, std430) EASYCAST_PB_QUAL restrict buffer PixelBuffer_ {
 	Pixel pixels[];
 } PixelBuffer;
 #endif
 
 uint getNextPixelIndex()
 {
+#if EASYCAST_OIT_AGG == 1
+	// EasyCast: one atomicAdd per subgroup instead of one per fragment (helper invocations take no slot)
+	bool real = !gl_HelperInvocation;
+	uvec4 ballot = subgroupBallot(real);
+	uint leader = subgroupBallotFindLSB(ballot);
+	uint base = 0u;
+	if (gl_SubgroupInvocationID == leader)
+		base = atomicAdd(PixelCounter.buffer_index, subgroupBallotBitCount(ballot));
+	base = subgroupMax(base);
+	uint index = base + subgroupBallotExclusiveBitCount(ballot);
+#else
 	uint index = atomicAdd(PixelCounter.buffer_index, 1);
+#endif
 	// If USE_BDA == 1, PixelBuffer.pixels.length() would fail to compile.
 	// However, even outside of BDA, a regression in the adreno 600 driver (v502) forces us
 	// to use a uniform anyway.
@@ -191,8 +226,11 @@ layout (set = 1, binding = 1) uniform sampler2D tex1;
 layout (set = 0, binding = 6) uniform sampler2D palette;
 #endif
 
-#if PASS == PASS_COLOR
+#if PASS == PASS_COLOR && EASYCAST_NOSTENCIL == 0
 layout (input_attachment_index = 0, set = 0, binding = 4) uniform usubpassInput shadow_stencil;
+#define EASYCAST_STENCIL() subpassLoad(shadow_stencil)
+#else
+#define EASYCAST_STENCIL() uvec4(0u)	// EasyCast: subpass 0 colour pass, no shadow volume in this frame
 #endif
 #if PASS == PASS_OIT
 layout (input_attachment_index = 0, set = 0, binding = 5) uniform subpassInput DepthTex;
@@ -242,7 +280,7 @@ void main()
 		int cur_shading_instr = pushConstants.shading_instr0;
 		int cur_fog_control = pushConstants.fog_control0;
 		#if PASS == PASS_COLOR
-			uvec4 stencil = subpassLoad(shadow_stencil);
+			uvec4 stencil = EASYCAST_STENCIL();
 			if (stencil.r == 0x81u) {
 				color = vtx_base1;
 				offset = vtx_offs1;
@@ -336,7 +374,7 @@ void main()
 	}
 	#endif
 	#if PASS == PASS_COLOR && pp_TwoVolumes == 0
-		uvec4 stencil = subpassLoad(shadow_stencil);
+		uvec4 stencil = EASYCAST_STENCIL();
 		if (stencil.r == 0x81u)
 			color.rgb *= uniformBuffer.shade_scale_factor;
 	#endif
@@ -369,6 +407,8 @@ void main()
 	
 	#if PASS == PASS_COLOR 
 		FragColor = color;
+	#elif PASS == PASS_OIT && EASYCAST_OIT_X == 1
+		// EasyCast measuring: fragment not stored
 	#elif PASS == PASS_OIT
 		ivec2 coords = ivec2(gl_FragCoord.xy);
 		uint idx =  getNextPixelIndex();
@@ -399,10 +439,38 @@ layout (input_attachment_index = 0, set = 2, binding = 0) uniform subpassInput t
 layout (location = 0) out vec4 FragColor;
 
 uint pixel_list[MAX_PIXELS_PER_FRAGMENT];
+#if EASYCAST_OIT_LOCAL == 1
+float sort_depth[MAX_PIXELS_PER_FRAGMENT];
+uint sort_key[MAX_PIXELS_PER_FRAGMENT];
+#endif
 
 
 int fillAndSortFragmentArray(ivec2 coords)
 {
+#if EASYCAST_OIT_LOCAL == 1
+	// EasyCast: every fragment is read once; the insertion sort compares local copies (same order as below)
+	uint idx = abufferPointer.pointers[coords.x + coords.y * uniformBuffer.viewportWidth];
+	int count = 0;
+	for (; idx != EOL && count < MAX_PIXELS_PER_FRAGMENT; count++)
+	{
+		const Pixel p = PixelBuffer.pixels[idx];
+		const float depth = p.depth;
+		const uint index = getPolyIndex(p);
+		int j = count - 1;
+		while (j >= 0 && (sort_depth[j] > depth || (sort_depth[j] == depth && sort_key[j] > index)))
+		{
+			pixel_list[j + 1] = pixel_list[j];
+			sort_depth[j + 1] = sort_depth[j];
+			sort_key[j + 1] = sort_key[j];
+			j--;
+		}
+		pixel_list[j + 1] = idx;
+		sort_depth[j + 1] = depth;
+		sort_key[j + 1] = index;
+		idx = p.next;
+	}
+	return count;
+#else
 	// Load fragments into a local memory array for sorting
 	uint idx = abufferPointer.pointers[coords.x + coords.y * uniformBuffer.viewportWidth];
 	if (idx == EOL)
@@ -433,12 +501,52 @@ int fillAndSortFragmentArray(ivec2 coords)
 		idx = PixelBuffer.pixels[idx].next;
 	}
 	return count;
+#endif
 }
 
 // Blend fragments back-to-front
 vec4 resolveAlphaBlend(ivec2 coords) {
 	
 	// Copy and sort fragments into a local array
+#if EASYCAST_OIT_SEL == 1
+	// EasyCast: no local array. Fragment i = the smallest (depth, poly index, list position) after fragment i-1.
+	vec4 finalColor = subpassLoad(tex);
+	vec4 secondaryBuffer = vec4(0.0); // Secondary accumulation buffer
+	const uint head = abufferPointer.pointers[coords.x + coords.y * uniformBuffer.viewportWidth];
+	int num_frag = 0;
+	for (uint c = head; c != EOL && num_frag < MAX_PIXELS_PER_FRAGMENT; num_frag++)
+		c = PixelBuffer.pixels[c].next;
+	float prevDepth = 0.0;
+	uint prevKey = 0u;
+	int prevPos = -1;
+	for (int i = 0; i < num_frag; i++)
+	{
+		Pixel best = Pixel(0u, 0.0, 0u, EOL);
+		float bestDepth = 0.0;
+		uint bestKey = 0u;
+		int bestPos = -1;
+		uint c = head;
+		for (int pos = 0; pos < num_frag; pos++)
+		{
+			const Pixel p = PixelBuffer.pixels[c];
+			const float d = p.depth;
+			const uint k = getPolyIndex(p);
+			const bool after = prevPos < 0 || d > prevDepth || (d == prevDepth && (k > prevKey || (k == prevKey && pos > prevPos)));
+			const bool better = bestPos < 0 || d < bestDepth || (d == bestDepth && (k < bestKey || (k == bestKey && pos < bestPos)));
+			if (after && better)
+			{
+				best = p;
+				bestDepth = d;
+				bestKey = k;
+				bestPos = pos;
+			}
+			c = p.next;
+		}
+		prevDepth = bestDepth;
+		prevKey = bestKey;
+		prevPos = bestPos;
+		const Pixel pixel = best;
+#else
 	int num_frag = fillAndSortFragmentArray(coords);
 	
 	vec4 finalColor = subpassLoad(tex);
@@ -447,6 +555,7 @@ vec4 resolveAlphaBlend(ivec2 coords) {
 	for (int i = 0; i < num_frag; i++)
 	{
 		const Pixel pixel = PixelBuffer.pixels[pixel_list[i]];
+#endif
 		const PolyParam pp = TrPolyParam.tr_poly_params[getPolyNumber(pixel)];
 		bool area1 = false;
 		bool shadowed = false;
@@ -554,7 +663,11 @@ void main(void)
 	// Compute and output final color for the frame buffer
 	// Visualize the number of layers in use
 	//FragColor = vec4(float(fillAndSortFragmentArray(coords)) / MAX_PIXELS_PER_FRAGMENT * 4, 0, 0, 1);
+#if EASYCAST_OIT_X == 2
+	FragColor = subpassLoad(tex);	// EasyCast measuring: no sort/blend
+#else
 	FragColor = resolveAlphaBlend(coords);
+#endif
 
 	// Reset pointers
 	abufferPointer.pointers[coords.x + coords.y * uniformBuffer.viewportWidth] = EOL;
@@ -770,7 +883,11 @@ vk::UniqueShaderModule OITShaderManager::compileShader(const FragmentShaderParam
 		.addConstant("ColorClamping", (int)params.clamping)
 		.addConstant("pp_Palette", params.palette)
 		.addConstant("DIV_POS_Z", (int)params.divPosZ)
-		.addConstant("PASS", (int)params.pass)
+		.addConstant("PASS", params.pass == Pass::ColorPre ? (int)Pass::Color : (int)params.pass)
+		.addConstant("EASYCAST_NOSTENCIL", params.pass == Pass::ColorPre ? 1 : 0)
+		.addConstant("EASYCAST_OIT_X", easycast_oit::mode())
+		.addConstant("EASYCAST_OIT_AGG", easycast_oit::agg() && params.pass == Pass::OIT ? 1 : 0)
+		.addConstant("EASYCAST_PB_QUAL", easycast_oit::nc() && params.pass == Pass::OIT ? "writeonly" : "coherent")
 		.addConstant("USE_BDA", (int)params.useBDA)
 		.addSource(GouraudSource)
 		.addSource(OITShaderHeader)
@@ -785,6 +902,10 @@ vk::UniqueShaderModule OITShaderManager::compileShader(const FinalShaderParams& 
 	VulkanSource src;
 	src.addConstant("MAX_PIXELS_PER_FRAGMENT", maxLayers)
 		.addConstant("DITHERING", (int)params.dithering)
+		.addConstant("EASYCAST_OIT_X", easycast_oit::mode())
+		.addConstant("EASYCAST_OIT_LOCAL", easycast_oit::local() ? 1 : 0)
+		.addConstant("EASYCAST_OIT_SEL", easycast_oit::sel() ? 1 : 0)
+		.addConstant("EASYCAST_PB_QUAL", easycast_oit::nc() ? "readonly" : "coherent")
 		.addConstant("USE_BDA", (int)params.useBDA)
 		.addSource(OITShaderHeader)
 		.addSource(OITFinalShaderSource);

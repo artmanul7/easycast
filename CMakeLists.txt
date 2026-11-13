@@ -321,7 +321,8 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 		$<$<OR:$<BOOL:${MINGW}>,$<BOOL:${MSVC}>>:_USE_MATH_DEFINES>)
 
 if(UNIX AND NOT ANDROID AND NOT APPLE)
-	execute_process(COMMAND getconf PAGESIZE OUTPUT_VARIABLE PAGE_SIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
+	# Локальная правка: сборка на Windows под ARM Linux, getconf тут нет. На приставке страница 4 КБ (проверено).
+	set(PAGE_SIZE 4096)
 	target_compile_definitions(${PROJECT_NAME} PRIVATE PAGE_SIZE=${PAGE_SIZE})
 endif()
 
@@ -1531,3 +1532,12 @@ if(${CMAKE_GENERATOR} MATCHES "^Xcode.*|^Visual Studio.*")
 	file(GLOB_RECURSE SRC_FILES *.h *.cpp *.c *.cc *.mm)
 	source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${SRC_FILES})
 endif()
+
+# EasyCast 0.1.4: IPO only for emulator-owned translation units.
+set_property(TARGET flycast PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+get_target_property(EASYCAST_SOURCES flycast SOURCES)
+foreach(EASYCAST_SOURCE IN LISTS EASYCAST_SOURCES)
+    if(EASYCAST_SOURCE MATCHES "(^|/)core/deps/")
+        set_property(SOURCE "${EASYCAST_SOURCE}" APPEND PROPERTY COMPILE_OPTIONS -fno-lto)
+    endif()
+endforeach()

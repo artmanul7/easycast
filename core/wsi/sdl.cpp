@@ -23,6 +23,7 @@
 #include "ui/gui.h"
 #include "sdl/sdl.h"
 #include "cfg/option.h"
+#include "easycast_timing.h"
 
 SDLGLGraphicsContext::SDLGLGraphicsContext(void *window, void *display)
 	: GLGraphicsContext(window, display)
@@ -119,7 +120,10 @@ void SDLGLGraphicsContext::swap()
 {
 	do_swap_automation();
 	changeGLSwapInterval();
+	static thread_local EasycastTiming timing("swap");
+	const auto start = EasycastTiming::Clock::now();
 	SDL_GL_SwapWindow((SDL_Window *)window);
+	timing.record(start);
 
 	// Check if drawable has been resized
 	SDL_GL_GetDrawableSize((SDL_Window *)window, &settings.display.width, &settings.display.height);

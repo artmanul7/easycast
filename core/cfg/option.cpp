@@ -106,7 +106,7 @@ Option<int> RenderResolution("rend.Resolution", 480);
 Option<bool> IntegerScale("rend.IntegerScale", false);
 Option<bool> LinearInterpolation("rend.LinearInterpolation", true);
 Option<bool> VSync("rend.vsync", true);
-Option<int64_t> PixelBufferSize("rend.PixelBufferSize", 512_MB);
+Option<int64_t> PixelBufferSize("rend.PixelBufferSize", 128_MB);
 Option<int> AnisotropicFiltering("rend.AnisotropicFiltering", 1);
 Option<int> TextureFiltering("rend.TextureFiltering", 0); // Default
 Option<bool> ThreadedRendering("rend.ThreadedRendering", true);
@@ -232,6 +232,7 @@ std::array<std::array<Option<int>, 2>, 4> NetworkExpansionDevices{{
 	Option<int>("device4.2.net", 0, "input")}},
 }};
 Option<bool> PerGameVmu("PerGameVmu", true, "config");
+Option<bool> StickDpadSwap("StickDpadSwap", false, "config");	// EasyCast 0.2.4 update 2
 #ifdef _WIN32
 Option<bool, false> UseRawInput("RawInput", false, "input");
 #endif
