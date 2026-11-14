@@ -77,6 +77,4 @@ savestate, usually twice in a row (A, B, A, B), because the handheld warms up du
 If you port any of this to another emulator or ship EasyCast in your OS, please tell us in Issues, we will be glad to
 hear it and to help.
 
-This work was done with the help of AI assistants: Claude by Anthropic (most of the optimizations, measurements and
-this release) and, for the first builds, ChatGPT by OpenAI. Every result was checked on the real handheld by the
-project's author.
+AI was used during development.

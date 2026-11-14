@@ -59,7 +59,7 @@ at 70 °C). How it was done, and what did not work: **[docs/DEVELOPMENT.md](docs
 
 | Setting | Where | What it does |
 |---|---|---|
-| **GD-ROM Fast Loading** | Settings → Advanced → Other | The disc drive works much faster than on a real Dreamcast: shorter loading screens and fewer pauses when a level streams data. Off by default because it is not accurate: some games misbehave or even stop with error 133 (Grandia II crashes in its intro). Turn it on only for games that work with it. You can turn it on for one game only with per-game settings. |
+| **GD-ROM Fast Loading** | Settings → Advanced → Other | The disc drive works much faster than on a real Dreamcast: shorter loading screens and fewer pauses when a level streams data. **Use with care.** It is not accurate, so it is off by default. I ran into a real problem: with it on, the videos in Grandia II did not start and the emulator quit with an error (133). Other games may break in other ways, for example music cut on a loading screen. Turn it on only for a game that works with it, using per-game settings. |
 | **Swap D-Pad and analog stick** | Settings → Controls | The stick works as the D-Pad and the D-Pad as the stick. Handy for games that want the stick where the D-Pad is more comfortable, or the other way round. Can be set per game. |
 | **Screen brightness** | Settings → Video, or Select + Up / Down in game | Brightness of the screen the game is on. The menu of the handheld keeps its own brightness. |
 | **Screen (top / bottom)** | Settings → Video | Which screen of a two-screen handheld shows the game; the other one is switched off to save power. |
@@ -67,25 +67,46 @@ at 70 °C). How it was done, and what did not work: **[docs/DEVELOPMENT.md](docs
 
 ## Compatibility
 
-| Device | OS | Status |
-|---|---|---|
-| Anbernic RG DS Plus (RK3568, Mali G52, two screens) | BananaOS 0.5.2.2 / 0.5.3.4 (kernel 7.2.7-banana) | ✅ tested |
-| Other RK3566/RK3568 devices | BananaOS with the same kernel | ⚠️ should start, untested |
-| One-screen devices | any | ⚠️ untested (EasyCast was only tested on two screens) |
-| Other systems (ROCKNIX, Knulli, muOS, ArkOS…) | their own kernels | ❌ the GPU module must match the kernel |
+EasyCast needs a handheld with the **Rockchip RK3566 or RK3568** chip (four Cortex-A55 cores, Mali-G52 GPU), 64-bit
+Linux, and a GPU kernel module built for the kernel of the system. Only one device and one system are tested.
 
-Other RK3566/RK3568 handhelds (for example the Anbernic RG353 series, RG503, Powkiddy RGB30) have the same
-Mali G52 GPU. EasyCast may run there once the GPU module is built for their kernel (see docs/BUILDING.md).
+| Status | What |
+|---|---|
+| ✅ Tested | Anbernic RG DS Plus (RK3568, two screens) on BananaOS 0.5.2.2 and 0.5.3.4 (kernel 7.2.7-banana) |
+| ⚠️ Same chip, untested | the handhelds in the list below, on BananaOS or any system once the GPU module fits its kernel |
+| ⚠️ One screen | untested, EasyCast was only tried on two screens |
+| ❌ Different chip | handhelds on RK3326, RK3399, RK3588 or Allwinner H700 (for example RG351, RG552, RG CubeXX, RG35XX): another GPU, the bundled driver does not fit |
 
-The installer and the launcher check one hard rule: the bundled GPU module (`mali_kbase.ko`) must be built for exactly
-the running kernel (`uname -r`). The OS name and device are only reported.
+### Handhelds with the same chip (might work)
+
+All of these use the RK3566 (or the RK3568, its close relative) with a Mali-G52 GPU, like the RG DS Plus. The list is
+from public specifications and the ROCKNIX device list; none of them except the RG DS Plus was tried with EasyCast.
+
+| Maker | Models | Chip | Screens |
+|---|---|---|---|
+| Anbernic | **RG DS Plus** (tested) | RK3568 | two, 1024x768 |
+| Anbernic | RG DS | RK3568 | two, 640x480 |
+| Anbernic | RG353P, RG353M, RG353V, RG353VS, RG353PS | RK3566 | one |
+| Anbernic | RG503 | RK3566 | one, OLED |
+| Anbernic | RG ARC-D, RG ARC-S | RK3566 | one |
+| Powkiddy | RGB30, RK2023, RGB10 Max 3, RGB20SX, X55, X35S | RK3566 | one |
+
+What it takes for another device:
+- the **GPU kernel module** (`mali_kbase.ko`) built for that system's kernel, see [docs/BUILDING.md](docs/BUILDING.md);
+- the launcher and screen code were written for the RG DS Plus (two panels, `backlight0` and `backlight1`), so
+  another device may need small changes there;
+- about 1 GB of RAM is enough for normal games; per-pixel mode (Shenmue) wants a lot more free memory.
+
+The installer and the launcher check one hard rule: the module must be built for exactly the running kernel
+(`uname -r`). The OS name and device are only reported.
 
 **Ports are welcome.** If you build the module for your kernel, or want EasyCast in your OS image, go ahead: all the
-sources are open (see below). We would be glad to hear about it.
+sources are open (see below). I would be glad to hear about it. If you try it on one of these handhelds, please write
+the result in Issues so the list can be updated.
 
 ## Requirements
 
-- BananaOS with kernel 7.2.7-banana on an RK3566/RK3568 handheld, Wi-Fi for installing and updates
+- BananaOS with kernel 7.2.7-banana on an RK3566/RK3568 handheld (tested only on the RG DS Plus), Wi-Fi for installing and updates
 - About 100 MB free on the card
 - Dreamcast games as `.chd`, `.gdi`, `.cdi` or `.cue` in `/data/roms/dreamcast`
 - An original BIOS is optional: without it Flycast's built-in HLE BIOS is used
@@ -95,7 +116,7 @@ sources are open (see below). We would be glad to hear about it.
 - Dead or Alive 2 drops to 54 to 58 FPS after several minutes of heavy fighting, when the chip reaches 70 °C.
 - Shenmue's notebook and some cutscenes with lots of transparency are slower than 30 FPS (GPU limit).
 - The first time a scene appears there can be a short stutter while GPU pipelines are built; then they are cached.
-- GD-ROM Fast Loading breaks some games: Grandia II stops with error 133 in its intro. Keep it off, or enable it per game.
+- GD-ROM Fast Loading can break games. In Grandia II the videos did not start and the emulator quit with error 133. Keep it off, or enable it for one game only.
 - One-screen devices are untested.
 
 ## Install
@@ -136,15 +157,12 @@ Delete the folder `/data/banana/easycast` and the tile `/data/store/tiles/EasyCa
 
 EasyCast is a fan project, not affiliated with SEGA. Dreamcast is a trademark of SEGA. Bring your own games.
 
-## Made with AI
+## About
 
-EasyCast was built with the help of AI assistants. Most optimizations, the measurements on the handheld, the
-packaging and this page were made together with Claude (Anthropic); the first builds with ChatGPT (OpenAI).
-Every result was checked by hand on a real RG DS Plus.
-Bug reports and pull requests are welcome.
+AI was used during development. Bug reports and pull requests are welcome.
 
 **Keywords:** Dreamcast emulator, Flycast fork, Vulkan, Mali G52, Bifrost, libmali, mali_kbase, Panfrost, RK3566,
-RK3568, Rockchip, Anbernic RG DS Plus, dual screen handheld, ARM64, Cortex-A55, SH4 dynarec, BananaOS, low power,
+RK3568, Rockchip, Anbernic RG DS Plus, RG DS, RG353, RG503, RG ARC, Powkiddy RGB30, dual screen handheld, ARM64, Cortex-A55, SH4 dynarec, BananaOS, low power,
 thermal throttling, GPU DVFS, retro handheld.
 
 ---
@@ -158,4 +176,4 @@ EasyCast это эмулятор Dreamcast (Flycast + Vulkan) для BananaOS н
 
 Буду рад, если разработчики своих прошивок для слабых приставок возьмут EasyCast себе как готовый эмулятор, а авторы других эмуляторов используют эти наработки. Всё открыто: код, замеры и то, что не сработало (docs/DEVELOPMENT.md).
 
-Проект сделан с помощью ИИ (в основном Claude от Anthropic, первые сборки с ChatGPT): правки кода, замеры на приставке, сборка и эта страница. Всё проверено вручную на настоящей RG DS Plus.
+При разработке был использован ИИ.
