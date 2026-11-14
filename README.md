@@ -75,12 +75,14 @@ Linux, and a GPU kernel module built for the kernel of the system. Only one devi
 | ✅ Tested | Anbernic RG DS Plus (RK3568, two screens) on BananaOS 0.5.2.2 and 0.5.3.4 (kernel 7.2.7-banana) |
 | ⚠️ Same chip, untested | the handhelds in the list below, on BananaOS or any system once the GPU module fits its kernel |
 | ⚠️ One screen | untested, EasyCast was only tried on two screens |
-| ❌ Different chip | handhelds on RK3326, RK3399, RK3588 or Allwinner H700 (for example RG351, RG552, RG CubeXX, RG35XX): another GPU, the bundled driver does not fit |
+| ❌ Different chip | handhelds on RK3326, RK3399, RK3588, Allwinner (H700, A133) or Snapdragon/MediaTek (for example RG351, RG552, RG CubeXX, RG35XX, Trimui Brick, Retroid Pocket): another GPU, the bundled driver does not fit |
 
 ### Handhelds with the same chip (might work)
 
 All of these use the RK3566 (or the RK3568, its close relative) with a Mali-G52 GPU, like the RG DS Plus. The list is
-from public specifications and the ROCKNIX device list; none of them except the RG DS Plus was tried with EasyCast.
+from public specifications and the ROCKNIX and Batocera device lists. **It is not complete**: there are more
+RK3566/RK3568 handhelds from smaller makers, and new ones keep appearing. None of them except the RG DS Plus was tried
+with EasyCast.
 
 | Maker | Models | Chip | Screens |
 |---|---|---|---|
@@ -89,7 +91,9 @@ from public specifications and the ROCKNIX device list; none of them except the 
 | Anbernic | RG353P, RG353M, RG353V, RG353VS, RG353PS | RK3566 | one |
 | Anbernic | RG503 | RK3566 | one, OLED |
 | Anbernic | RG ARC-D, RG ARC-S | RK3566 | one |
-| Powkiddy | RGB30, RK2023, RGB10 Max 3, RGB20SX, X55, X35S | RK3566 | one |
+| Powkiddy | RGB30, RK2023, RGB10 Max 3, RGB20SX, RGB20 Pro, X55, X35S, X35H | RK3566 | one |
+| Miyoo | Flip, Flip V2 (clamshell) | RK3566 | one |
+| MiniLoong | Pocket One | RK3566 | one |
 
 What it takes for another device:
 - the **GPU kernel module** (`mali_kbase.ko`) built for that system's kernel, see [docs/BUILDING.md](docs/BUILDING.md);
@@ -162,7 +166,7 @@ EasyCast is a fan project, not affiliated with SEGA. Dreamcast is a trademark of
 AI was used during development. Bug reports and pull requests are welcome.
 
 **Keywords:** Dreamcast emulator, Flycast fork, Vulkan, Mali G52, Bifrost, libmali, mali_kbase, Panfrost, RK3566,
-RK3568, Rockchip, Anbernic RG DS Plus, RG DS, RG353, RG503, RG ARC, Powkiddy RGB30, dual screen handheld, ARM64, Cortex-A55, SH4 dynarec, BananaOS, low power,
+RK3568, Rockchip, Anbernic RG DS Plus, RG DS, RG353, RG503, RG ARC, Powkiddy RGB30, Miyoo Flip, dual screen handheld, ARM64, Cortex-A55, SH4 dynarec, BananaOS, low power,
 thermal throttling, GPU DVFS, retro handheld.
 
 ---
