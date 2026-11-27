@@ -88,7 +88,10 @@ public:
                 if(connector && crtc) break;
             }
             freeres(r);
-            if(!connector || !crtc || mode.hdisplay!=1024 || mode.vdisplay!=768)
+            // The two DS panel modes: 1024x768 on the RG DS Plus, 640x480 on the RG DS (same RK3568, smaller panels).
+            // The dumb buffers, framebuffers and page flips below all follow the mode, so both are presented the same way.
+            const bool dsMode=(mode.hdisplay==1024 && mode.vdisplay==768) || (mode.hdisplay==640 && mode.vdisplay==480);
+            if(!connector || !crtc || !dsMode)
                 throw std::runtime_error("Selected DS panel/mode unavailable");
             drmModeCrtc *old=getcrtc(fd,crtc);
             if(!old) throw std::runtime_error("Cannot save CRTC");
