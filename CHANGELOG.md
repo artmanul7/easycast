@@ -2,6 +2,10 @@
 
 Dead or Alive 2 heavy fight is the main speed test (frames per second on the RG DS Plus, native 640x480).
 
+## 0.2.9
+- The Vulkan DRM presenter accepts the 640x480 panel mode on the Anbernic RG DS alongside the 1024x768 mode on the RG DS Plus.
+- Thanks to [@RockwellShah](https://github.com/RockwellShah) for the fix and for testing Vulkan on the RG DS with a patched 0.2.8 binary ([PR #3](https://github.com/artmanul7/easycast/pull/3)).
+
 ## 0.2.8 (first public release)
 - GPU powers down between frames (Mali `power_policy` `coarse_demand`): 1 to 5% less power, same FPS
 - Screen brightness of the game panel: Settings → Video and Select + Up / Down

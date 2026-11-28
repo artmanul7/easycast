@@ -68,26 +68,31 @@ at 70 °C). How it was done, and what did not work: **[docs/DEVELOPMENT.md](docs
 ## Compatibility
 
 EasyCast needs a handheld with the **Rockchip RK3566 or RK3568** chip (four Cortex-A55 cores, Mali-G52 GPU), 64-bit
-Linux, and a GPU kernel module built for the kernel of the system. Only one device and one system are tested.
+Linux, and a GPU kernel module built for the kernel of the system.
 
 | Status | What |
 |---|---|
 | ✅ Tested | Anbernic RG DS Plus (RK3568, two screens) on BananaOS 0.5.2.2 and 0.5.3.4 (kernel 7.2.7-banana) |
-| ⚠️ Same chip, untested | the handhelds in the list below, on BananaOS or any system once the GPU module fits its kernel |
+| 🧪 Community test | Anbernic RG DS on BananaOS 0.5.3.6 (kernel 7.2.7-banana). Vulkan worked on the top screen with a patched 0.2.8 binary. The 0.2.9 package is available for testing. |
+| ⚠️ Same chip, untested | the other handhelds in the list below, on BananaOS or any system once the GPU module fits its kernel |
 | ⚠️ One screen | untested, EasyCast was only tried on two screens |
 | ❌ Different chip | handhelds on RK3326, RK3399, RK3588, Allwinner (H700, A133) or Snapdragon/MediaTek (for example RG351, RG552, RG CubeXX, RG35XX, Trimui Brick, Retroid Pocket): another GPU, the bundled driver does not fit |
+
+Thanks to [@RockwellShah](https://github.com/RockwellShah) for fixing Vulkan support for the RG DS's 640x480
+panels and testing the fix on his handheld. See [PR #3](https://github.com/artmanul7/easycast/pull/3) and the
+[EasyCast 0.2.9 prerelease](https://github.com/artmanul7/easycast/releases/tag/v0.2.9).
 
 ### Handhelds with the same chip (might work)
 
 All of these use the RK3566 (or the RK3568, its close relative) with a Mali-G52 GPU, like the RG DS Plus. The list is
 from public specifications and the ROCKNIX and Batocera device lists. **It is not complete**: there are more
-RK3566/RK3568 handhelds from smaller makers, and new ones keep appearing. None of them except the RG DS Plus was tried
-with EasyCast.
+RK3566/RK3568 handhelds from smaller makers, and new ones keep appearing. Test results for the two RG DS models are
+listed above.
 
 | Maker | Models | Chip | Screens |
 |---|---|---|---|
 | Anbernic | **RG DS Plus** (tested) | RK3568 | two, 1024x768 |
-| Anbernic | RG DS | RK3568 | two, 640x480 |
+| Anbernic | RG DS (community test) | RK3568 | two, 640x480 |
 | Anbernic | RG353P, RG353M, RG353V, RG353VS, RG353PS | RK3566 | one |
 | Anbernic | RG503 | RK3566 | one, OLED |
 | Anbernic | RG ARC-D, RG ARC-S | RK3566 | one |
@@ -110,7 +115,7 @@ the result in Issues so the list can be updated.
 
 ## Requirements
 
-- BananaOS with kernel 7.2.7-banana on an RK3566/RK3568 handheld (tested only on the RG DS Plus), Wi-Fi for installing and updates
+- BananaOS with kernel 7.2.7-banana on an RK3566/RK3568 handheld (see compatibility above), Wi-Fi for installing and updates
 - About 100 MB free on the card
 - Dreamcast games as `.chd`, `.gdi`, `.cdi` or `.cue` in `/data/roms/dreamcast`
 - An original BIOS is optional: without it Flycast's built-in HLE BIOS is used
